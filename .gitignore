@@ -1,0 +1,6 @@
+﻿data/drone_dashboard.db
+data/uploads/
+__pycache__/
+*.pyc
+.superpowers/
+
