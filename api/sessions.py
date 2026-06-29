@@ -83,6 +83,13 @@ def create_session():
 # ──────────────────────────────────────────────
 @bp.route("/<int:sid>/process", methods=["POST"])
 def process_session(sid):
+    db = get_db()
+    row = db.execute("SELECT status FROM drone_sessions WHERE id=?", (sid,)).fetchone()
+    db.close()
+    if row is None:
+        return jsonify({"error": "Not found"}), 404
+    if row["status"] not in ("pending", "error"):
+        return jsonify({"error": "Session sudah diproses atau sedang diproses"}), 409
     thread = threading.Thread(target=_run_pipeline, args=(sid,), daemon=True)
     thread.start()
     return jsonify({"ok": True})
@@ -117,45 +124,49 @@ def _set_progress(sid, pct, msg, done=False):
 
 def _run_pipeline(sid: int):
     db = get_db()
-    row = db.execute(
-        "SELECT tanggal_terbang, boundary_id, video_files FROM drone_sessions WHERE id=?", (sid,)
-    ).fetchone()
-    if row is None:
-        db.close()
-        _set_progress(sid, 0, f"Session {sid} tidak ditemukan.", done=True)
-        return
-
-    tanggal     = row["tanggal_terbang"]
-    boundary_id = row["boundary_id"]
-    video_files = json.loads(row["video_files"] or "[]")
-
-    db.execute("UPDATE drone_sessions SET status='processing' WHERE id=?", (sid,))
-    db.commit()
-
-    # Load boundary bloks (geometry list for spatial lookup + DB rows for metadata)
-    bloks_geom = []
-    bloks_db   = []
-    if boundary_id:
-        shp_row = db.execute(
-            "SELECT shp_dir FROM boundaries WHERE id=?", (boundary_id,)
+    try:
+        row = db.execute(
+            "SELECT tanggal_terbang, boundary_id, video_files FROM drone_sessions WHERE id=?", (sid,)
         ).fetchone()
-        if shp_row:
-            try:
-                bloks_geom = load_shapefile(shp_row["shp_dir"])
-            except Exception:
-                bloks_geom = []
-        bloks_db = db.execute(
-            "SELECT id, nama_area, bulan_tanam, tahun_tanam FROM bloks WHERE boundary_id=?",
-            (boundary_id,)
-        ).fetchall()
+        if row is None:
+            _set_progress(sid, 0, f"Session {sid} tidak ditemukan.", done=True)
+            return
 
-    # Load canopy thresholds
-    thresh_rows = db.execute(
-        "SELECT usia_min_bulan, usia_max_bulan, diameter_min_m "
-        "FROM canopy_thresholds WHERE jenis_tanaman='default' ORDER BY usia_min_bulan"
-    ).fetchall()
-    thresholds = [dict(t) for t in thresh_rows]
-    db.close()
+        tanggal     = row["tanggal_terbang"]
+        boundary_id = row["boundary_id"]
+        video_files = json.loads(row["video_files"] or "[]")
+
+        db.execute("UPDATE drone_sessions SET status='processing' WHERE id=?", (sid,))
+        db.commit()
+
+        # Load boundary bloks (geometry list for spatial lookup + DB rows for metadata)
+        bloks_geom = []
+        bloks_db   = []
+        if boundary_id:
+            shp_row = db.execute(
+                "SELECT shp_dir FROM boundaries WHERE id=?", (boundary_id,)
+            ).fetchone()
+            if shp_row:
+                try:
+                    bloks_geom = load_shapefile(shp_row["shp_dir"])
+                except Exception:
+                    bloks_geom = []
+            bloks_db = db.execute(
+                "SELECT id, nama_area, bulan_tanam, tahun_tanam FROM bloks WHERE boundary_id=?",
+                (boundary_id,)
+            ).fetchall()
+
+        # Load canopy thresholds
+        thresh_rows = db.execute(
+            "SELECT usia_min_bulan, usia_max_bulan, diameter_min_m "
+            "FROM canopy_thresholds WHERE jenis_tanaman='default' ORDER BY usia_min_bulan"
+        ).fetchall()
+        thresholds = [dict(t) for t in thresh_rows]
+    finally:
+        db.close()
+
+    # Build name-keyed dict so spatial lookup by geometry name maps correctly to DB row
+    bloks_db_by_name = {row["nama_area"]: row for row in bloks_db}
 
     sess_dir  = os.path.join(UPLOAD_DIR, f"session_{sid}")
     vid_dir   = os.path.join(sess_dir, "videos")
@@ -200,8 +211,8 @@ def _run_pipeline(sid: int):
 
                 # Default usia from first blok; refined per-hole after dedup
                 usia = 0
-                if bloks_db:
-                    b0   = bloks_db[0]
+                if bloks_db_by_name:
+                    b0   = next(iter(bloks_db_by_name.values()))
                     usia = get_usia_bulan(
                         b0["bulan_tanam"] or "JANUARI",
                         b0["tahun_tanam"] or 2026,
@@ -223,14 +234,16 @@ def _run_pipeline(sid: int):
             usia_b  = 0
             e, n = wgs84_to_utm50n(h["lat"], h["lon"])
             idx = find_blok_for_point(e, n, bloks_geom)
-            if idx is not None and idx < len(bloks_db):
-                brow    = bloks_db[idx]
-                blok_id = brow["id"]
-                usia_b  = get_usia_bulan(
-                    brow["bulan_tanam"] or "JANUARI",
-                    brow["tahun_tanam"] or 2026,
-                    tanggal,
-                )
+            if idx is not None:
+                geom_blok = bloks_geom[idx]
+                brow = bloks_db_by_name.get(geom_blok["nama_area"])
+                if brow:
+                    blok_id = brow["id"]
+                    usia_b  = get_usia_bulan(
+                        brow["bulan_tanam"] or "JANUARI",
+                        brow["tahun_tanam"] or 2026,
+                        tanggal,
+                    )
 
             db2.execute(
                 "INSERT INTO lubang_deteksi "
