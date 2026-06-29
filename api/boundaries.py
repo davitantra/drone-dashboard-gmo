@@ -1,4 +1,4 @@
-import os, json, zipfile, shutil
+import os, zipfile, shutil
 from datetime import datetime
 from flask import Blueprint, request, jsonify
 from database import get_db
@@ -27,17 +27,16 @@ def create_boundary():
         return jsonify({"error": "File zip diperlukan"}), 400
 
     f = request.files["file"]
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
     shp_dir = os.path.join(UPLOAD_DIR, f"shp_{ts}")
     os.makedirs(shp_dir, exist_ok=True)
 
     zip_path = os.path.join(shp_dir, "upload.zip")
     f.save(zip_path)
-    with zipfile.ZipFile(zip_path, "r") as z:
-        z.extractall(shp_dir)
-    os.remove(zip_path)
-
     try:
+        with zipfile.ZipFile(zip_path, "r") as z:
+            z.extractall(shp_dir)
+        os.remove(zip_path)
         bloks = load_shapefile(shp_dir)
     except Exception as e:
         shutil.rmtree(shp_dir, ignore_errors=True)
@@ -63,20 +62,24 @@ def create_boundary():
 def update_boundary(bid):
     data = request.get_json() or {}
     db = get_db()
-    db.execute(
+    cur = db.execute(
         "UPDATE boundaries SET nama=COALESCE(?,nama), deskripsi=COALESCE(?,deskripsi), updated_at=? WHERE id=?",
         (data.get("nama"), data.get("deskripsi"), _now(), bid)
     )
     db.commit()
     db.close()
+    if cur.rowcount == 0:
+        return jsonify({"error": "Not found"}), 404
     return jsonify({"ok": True})
 
 @bp.route("/<int:bid>", methods=["DELETE"])
 def delete_boundary(bid):
     db = get_db()
     row = db.execute("SELECT shp_dir FROM boundaries WHERE id=?", (bid,)).fetchone()
-    if row:
-        shutil.rmtree(row["shp_dir"], ignore_errors=True)
+    if not row:
+        db.close()
+        return jsonify({"error": "Not found"}), 404
+    shutil.rmtree(row["shp_dir"], ignore_errors=True)
     db.execute("DELETE FROM boundaries WHERE id=?", (bid,))
     db.commit()
     db.close()
