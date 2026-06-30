@@ -80,7 +80,8 @@ function loadBloks(boundaryId) {
     .then(function(geojson) {
       L.geoJSON(geojson, {
         style: function(f) {
-          return { color: '#1F4E79', weight: 2, fillOpacity: 0.1, fillColor: '#2E75B6' };
+          var c = f.properties.color || 'merah';
+          return { color: WARNA[c] || '#888', weight: 2, fillOpacity: 0.35, fillColor: WARNA_FILL[c] || WARNA_FILL.merah };
         },
         onEachFeature: function(f, layer) {
           const p = f.properties;

@@ -172,7 +172,12 @@ function renderSessionList(sessions) {
 
 function processSession(id) {
   fetch('/api/sessions/' + id + '/process', { method: 'POST' })
-    .then(function() {
+    .then(function(res) {
+      if (!res.ok) {
+        return res.json().catch(function() { return {}; }).then(function(err) {
+          alert('Gagal memproses: ' + (err.error || res.status));
+        });
+      }
       document.getElementById('progress-panel').style.display = '';
       listenProgress(id);
     });
