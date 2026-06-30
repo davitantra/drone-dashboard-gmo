@@ -1,0 +1,81 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', sans-serif; font-size: 13px; background: #f0f2f5; color: #1a1a2e; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+.navbar { background: #1F4E79; color: white; display: flex; align-items: center; padding: 0 16px; height: 48px; gap: 12px; flex-shrink: 0; }
+.brand { font-weight: 700; font-size: 15px; margin-right: 12px; }
+.nav-tabs { display: flex; gap: 4px; }
+.nav-tab { background: transparent; border: none; color: rgba(255,255,255,0.7); padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+.nav-tab.active, .nav-tab:hover { background: rgba(255,255,255,0.2); color: white; }
+.server-info { margin-left: auto; font-size: 11px; opacity: 0.6; }
+
+.tab-content { display: none; flex: 1; overflow: hidden; }
+.tab-content.active { display: flex; }
+
+/* PETA TAB */
+#tab-peta { flex-direction: row; }
+.sidebar { width: 280px; background: white; border-right: 1px solid #e0e0e0; overflow-y: auto; flex-shrink: 0; }
+.panel { padding: 12px 14px; border-bottom: 1px solid #f0f0f0; }
+.panel h3 { font-size: 11px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.7px; margin-bottom: 8px; }
+.main-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+#map { flex: 1; }
+.bottom-table { height: 170px; border-top: 1px solid #e0e0e0; background: white; display: flex; flex-direction: column; }
+.table-header { padding: 8px 14px; font-weight: 700; font-size: 12px; border-bottom: 1px solid #f0f0f0; }
+.table-wrap { overflow-y: auto; flex: 1; }
+table { width: 100%; border-collapse: collapse; font-size: 11px; }
+th { background: #f5f7fa; padding: 5px 10px; text-align: left; font-size: 10px; text-transform: uppercase; color: #666; position: sticky; top: 0; }
+td { padding: 4px 10px; border-bottom: 1px solid #f5f5f5; }
+tr:hover td { background: #fafbff; }
+
+.input-field { display: block; width: 100%; padding: 7px 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 12px; margin-bottom: 6px; }
+.upload-zone { display: block; border: 2px dashed #c0d8f0; border-radius: 6px; padding: 12px; text-align: center; background: #f7fbff; cursor: pointer; font-size: 12px; color: #555; margin-bottom: 6px; }
+.upload-zone:hover { border-color: #1F4E79; }
+.btn { display: block; width: 100%; padding: 8px; background: #1F4E79; color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 600; cursor: pointer; margin-bottom: 6px; text-align: center; }
+.btn:hover { background: #163d62; }
+.btn-outline { background: white; color: #1F4E79; border: 1.5px solid #1F4E79; }
+.btn-outline:hover { background: #f0f5fb; }
+.btn-sm { padding: 5px 10px; font-size: 11px; width: auto; display: inline-block; }
+
+.progress-bar { height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden; }
+.progress-fill { height: 100%; background: #1F4E79; border-radius: 4px; transition: width 0.5s; width: 0%; }
+
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.stat-card { background: #f8f9fa; border-radius: 6px; padding: 8px; }
+.stat-val { font-size: 18px; font-weight: 700; color: #1F4E79; }
+.stat-lbl { font-size: 10px; color: #888; margin-top: 2px; }
+.stat-card.green .stat-val { color: #27ae60; }
+.stat-card.orange .stat-val { color: #e67e22; }
+.stat-card.red .stat-val { color: #e74c3c; }
+
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }
+.badge-hijau { background: #E2EFDA; color: #27ae60; }
+.badge-oranye { background: #FCE4D6; color: #e67e22; }
+.badge-merah { background: #FFD7D7; color: #e74c3c; }
+
+/* BOUNDARY & SESI TAB */
+#tab-boundary, #tab-sesi { overflow-y: auto; }
+.boundary-page, .settings-page { padding: 20px; max-width: 800px; }
+.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.page-header h2 { font-size: 16px; }
+.page-header .btn { width: auto; display: inline-block; }
+.boundary-card { background: white; border: 1px solid #e0e0e0; border-radius: 8px; padding: 14px 16px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+.boundary-card-info h4 { font-size: 13px; font-weight: 700; }
+.boundary-card-info p { font-size: 11px; color: #888; margin-top: 2px; }
+.boundary-card-actions { display: flex; gap: 6px; }
+.btn-danger { background: #e74c3c; color: white; }
+.btn-danger:hover { background: #c0392b; }
+
+/* SESSION CARD */
+.session-card { background: white; border: 1px solid #e0e0e0; border-radius: 8px; padding: 14px 16px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+.session-card-info h4 { font-size: 13px; font-weight: 700; }
+.session-card-info p { font-size: 11px; color: #888; margin-top: 2px; }
+.session-card-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.status-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }
+.status-pending { background: #f0f0f0; color: #666; }
+.status-processing { background: #fff3cd; color: #856404; }
+.status-done { background: #d4edda; color: #155724; }
+.status-error { background: #f8d7da; color: #721c24; }
+
+/* SETTINGS TAB */
+#tab-settings { overflow-y: auto; }
+.settings-page .panel { background: white; border-radius: 8px; padding: 16px; margin-bottom: 12px; border: 1px solid #e0e0e0; }
+.settings-page label { display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px; color: #555; }

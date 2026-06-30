@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, render_template
 from database import init_db
 from api.boundaries import bp as boundaries_bp
 from api.sessions import bp as sessions_bp
@@ -14,7 +14,7 @@ def create_app():
 
     @app.route("/")
     def index():
-        return app.send_static_file("../templates/index.html")
+        return render_template("index.html")
 
     return app
 

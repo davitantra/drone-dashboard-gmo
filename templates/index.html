@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Drone Dashboard GMO</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link rel="stylesheet" href="/static/css/style.css"/>
+</head>
+<body>
+<nav class="navbar">
+  <span class="brand">🛸 Drone Dashboard GMO</span>
+  <div class="nav-tabs">
+    <button class="nav-tab active" data-tab="peta">🗺️ Peta & Analisis</button>
+    <button class="nav-tab" data-tab="boundary">📁 Boundary</button>
+    <button class="nav-tab" data-tab="sesi">📹 Sesi Drone</button>
+    <button class="nav-tab" data-tab="settings">⚙️ Pengaturan</button>
+  </div>
+  <span class="server-info" id="server-info">● localhost:5000</span>
+</nav>
+
+<!-- TAB PETA -->
+<div id="tab-peta" class="tab-content active">
+  <div class="sidebar">
+    <div class="panel">
+      <h3>📹 Sesi Drone</h3>
+      <select id="session-select"><option value="">-- Pilih sesi --</option></select>
+    </div>
+    <div class="panel" id="stats-panel" style="display:none">
+      <h3>📊 Hasil</h3>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-val" id="stat-total">—</div><div class="stat-lbl">Total Lubang</div></div>
+        <div class="stat-card green"><div class="stat-val" id="stat-hijau">—</div><div class="stat-lbl">Hijau</div></div>
+        <div class="stat-card orange"><div class="stat-val" id="stat-oranye">—</div><div class="stat-lbl">Oranye</div></div>
+        <div class="stat-card red"><div class="stat-val" id="stat-merah">—</div><div class="stat-lbl">Merah</div></div>
+      </div>
+      <button class="btn btn-outline" id="btn-export-csv" style="margin-top:8px">⬇ CSV</button>
+      <button class="btn" id="btn-export-excel">⬇ Excel</button>
+    </div>
+    <div class="panel">
+      <h3>🗂️ Boundary</h3>
+      <select id="boundary-map-select"><option value="">-- Pilih boundary --</option></select>
+    </div>
+    <div class="panel" id="blok-summary-panel" style="display:none">
+      <h3>📌 Per Blok</h3>
+      <div id="blok-list"></div>
+    </div>
+  </div>
+  <div class="main-area">
+    <div id="map"></div>
+    <div class="bottom-table" id="bottom-table" style="display:none">
+      <div class="table-header">
+        <span>Ringkasan per Blok</span>
+      </div>
+      <div class="table-wrap">
+        <table id="blok-table">
+          <thead><tr><th>Blok</th><th>Luas</th><th>Target</th><th>Terdeteksi</th><th>Hijau</th><th>Oranye</th><th>Merah</th><th>Coverage</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB BOUNDARY -->
+<div id="tab-boundary" class="tab-content">
+  <div class="boundary-page">
+    <div class="page-header">
+      <h2>Manajemen Boundary</h2>
+      <button class="btn" id="btn-add-boundary">+ Tambah Boundary</button>
+    </div>
+    <div id="add-boundary-form" style="display:none" class="panel">
+      <h3>Upload Shapefile Baru</h3>
+      <input type="text" id="bnd-nama" placeholder="Nama boundary" class="input-field">
+      <input type="text" id="bnd-desc" placeholder="Deskripsi (opsional)" class="input-field">
+      <label class="upload-zone" id="bnd-drop">
+        <input type="file" id="bnd-file" accept=".zip" style="display:none">
+        📂 Upload file .zip (shp + dbf + prj + shx)
+      </label>
+      <div id="bnd-filename" style="font-size:11px;color:#555;margin-top:4px;"></div>
+      <button class="btn" id="btn-save-boundary">Simpan</button>
+      <button class="btn btn-outline" id="btn-cancel-boundary">Batal</button>
+    </div>
+    <div id="boundary-list"></div>
+  </div>
+</div>
+
+<!-- TAB SESI -->
+<div id="tab-sesi" class="tab-content">
+  <div class="boundary-page">
+    <div class="page-header">
+      <h2>Sesi Drone</h2>
+      <button class="btn" id="btn-new-session">+ Sesi Baru</button>
+    </div>
+    <div id="upload-panel" style="display:none" class="panel">
+      <h3>Upload Video</h3>
+      <input type="text" id="sesi-nama" placeholder="Nama sesi" class="input-field">
+      <input type="date" id="sesi-tanggal" class="input-field">
+      <select id="sesi-boundary" class="input-field"><option value="">-- Pilih boundary --</option></select>
+      <label class="upload-zone" id="video-drop">
+        <input type="file" id="video-input" multiple accept=".mp4,.MP4,.srt,.SRT" style="display:none">
+        📂 Drag & drop MP4 + SRT
+      </label>
+      <div id="video-list"></div>
+      <button class="btn" id="btn-upload">Upload & Proses</button>
+      <button class="btn btn-outline" id="btn-cancel-upload">Batal</button>
+    </div>
+    <div class="panel" id="progress-panel" style="display:none">
+      <h3>⚙️ Memproses...</h3>
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      <p id="progress-msg" style="font-size:11px;margin-top:4px;color:#555"></p>
+    </div>
+    <div id="session-list"></div>
+  </div>
+</div>
+
+<!-- TAB SETTINGS -->
+<div id="tab-settings" class="tab-content">
+  <div class="settings-page">
+    <h2>Pengaturan</h2>
+    <div class="panel">
+      <h3>Informasi Server</h3>
+      <p style="font-size:12px;color:#555;margin-bottom:10px">Server berjalan di <strong>localhost:5000</strong></p>
+      <label>Nama Organisasi</label>
+      <input type="text" id="set-org" class="input-field" placeholder="BerauCoal GMO">
+      <label>Path FFmpeg</label>
+      <input type="text" id="set-ffmpeg" class="input-field" placeholder="C:\ffmpeg\bin\ffmpeg.exe">
+      <label>Jarak Tanam Default (meter)</label>
+      <input type="number" id="set-spacing" class="input-field" value="4">
+      <button class="btn" id="btn-save-settings">Simpan Pengaturan</button>
+    </div>
+    <div class="panel">
+      <h3>Threshold Tajuk (default)</h3>
+      <table id="threshold-table">
+        <thead><tr><th>Usia Min (bln)</th><th>Usia Max (bln)</th><th>Min Diameter (m)</th></tr></thead>
+        <tbody>
+          <tr><td>0</td><td>12</td><td>0.5</td></tr>
+          <tr><td>13</td><td>24</td><td>1.0</td></tr>
+          <tr><td>25</td><td>36</td><td>1.5</td></tr>
+          <tr><td>37</td><td>999</td><td>2.0</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/static/js/map.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>
