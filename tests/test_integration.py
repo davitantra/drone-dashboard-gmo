@@ -18,6 +18,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 SHAPEFILE_DIR = r"C:\Users\davi.tantra\Downloads\REVEGETASI2026"
 SHP_BASENAME = "rvg_gmo_kum_2605"
+SHAPEFILE_AVAILABLE = os.path.isdir(SHAPEFILE_DIR) and os.path.exists(
+    os.path.join(SHAPEFILE_DIR, SHP_BASENAME + ".shp")
+)
 SHP_EXTENSIONS = [".shp", ".dbf", ".prj", ".shx"]
 
 
@@ -72,6 +75,7 @@ def client(app):
 # Boundary flow
 # ─────────────────────────────────────────────────────────────────────────────
 
+@pytest.mark.skipif(not SHAPEFILE_AVAILABLE, reason="Shapefile not found at SHAPEFILE_DIR")
 class TestBoundaryFlow:
     boundary_id = None
 

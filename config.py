@@ -5,7 +5,8 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
 DB_PATH = os.path.join(DATA_DIR, "drone_dashboard.db")
 
-FFMPEG_PATH = r"C:\Users\davi.tantra\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1.1-full_build\bin\ffmpeg.exe"
+_FFMPEG_DEFAULT = r"C:\Users\davi.tantra\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1.1-full_build\bin\ffmpeg.exe"
+FFMPEG_PATH = _FFMPEG_DEFAULT if os.path.exists(_FFMPEG_DEFAULT) else "ffmpeg"
 
 # DJI Air3s
 IMG_W = 1920

@@ -131,13 +131,14 @@
     </div>
     <div class="panel">
       <h3>Threshold Tajuk (default)</h3>
+      <p style="font-size:0.85em;color:#888;margin-bottom:6px;">Nilai default yang di-seed ke database. Dapat diubah melalui tabel <code>canopy_thresholds</code>.</p>
       <table id="threshold-table">
-        <thead><tr><th>Usia Min (bln)</th><th>Usia Max (bln)</th><th>Min Diameter (m)</th></tr></thead>
+        <thead><tr><th>Usia Tanaman</th><th>Rentang (bulan)</th><th>Min Diameter (m)</th></tr></thead>
         <tbody>
-          <tr><td>0</td><td>12</td><td>0.5</td></tr>
-          <tr><td>13</td><td>24</td><td>1.0</td></tr>
-          <tr><td>25</td><td>36</td><td>1.5</td></tr>
-          <tr><td>37</td><td>999</td><td>2.0</td></tr>
+          <tr><td>0–2 bulan</td><td>0 – 2</td><td>≥ 0.15</td></tr>
+          <tr><td>3–5 bulan</td><td>3 – 5</td><td>≥ 0.30</td></tr>
+          <tr><td>6–11 bulan</td><td>6 – 11</td><td>≥ 0.60</td></tr>
+          <tr><td>12+ bulan</td><td>12 – 999</td><td>≥ 1.00</td></tr>
         </tbody>
       </table>
     </div>

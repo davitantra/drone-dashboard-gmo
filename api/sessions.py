@@ -227,43 +227,45 @@ def _run_pipeline(sid: int):
 
         _set_progress(sid, 95, "Simpan ke database...")
         db2 = get_db()
-        db2.execute("DELETE FROM lubang_deteksi WHERE session_id=?", (sid,))
+        try:
+            db2.execute("DELETE FROM lubang_deteksi WHERE session_id=?", (sid,))
 
-        for h in deduped:
-            blok_id = None
-            usia_b  = 0
-            e, n = wgs84_to_utm50n(h["lat"], h["lon"])
-            idx = find_blok_for_point(e, n, bloks_geom)
-            if idx is not None:
-                geom_blok = bloks_geom[idx]
-                brow = bloks_db_by_name.get(geom_blok["nama_area"])
-                if brow:
-                    blok_id = brow["id"]
-                    usia_b  = get_usia_bulan(
-                        brow["bulan_tanam"] or "JANUARI",
-                        brow["tahun_tanam"] or 2026,
-                        tanggal,
-                    )
+            for h in deduped:
+                blok_id = None
+                usia_b  = 0
+                e, n = wgs84_to_utm50n(h["lat"], h["lon"])
+                idx = find_blok_for_point(e, n, bloks_geom)
+                if idx is not None:
+                    geom_blok = bloks_geom[idx]
+                    brow = bloks_db_by_name.get(geom_blok["nama_area"])
+                    if brow:
+                        blok_id = brow["id"]
+                        usia_b  = get_usia_bulan(
+                            brow["bulan_tanam"] or "JANUARI",
+                            brow["tahun_tanam"] or 2026,
+                            tanggal,
+                        )
 
-            db2.execute(
-                "INSERT INTO lubang_deteksi "
-                "(session_id, blok_id, latitude, longitude, status_tanam, "
-                " diameter_tajuk_m, kategori_tajuk, usia_bulan) "
-                "VALUES (?,?,?,?,?,?,?,?)",
-                (
-                    sid, blok_id,
-                    h["lat"], h["lon"],
-                    h["status_tanam"],
-                    h["diameter_tajuk_m"],
-                    h["kategori_tajuk"],
-                    usia_b,
-                ),
-            )
+                db2.execute(
+                    "INSERT INTO lubang_deteksi "
+                    "(session_id, blok_id, latitude, longitude, status_tanam, "
+                    " diameter_tajuk_m, kategori_tajuk, usia_bulan) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (
+                        sid, blok_id,
+                        h["lat"], h["lon"],
+                        h["status_tanam"],
+                        h["diameter_tajuk_m"],
+                        h["kategori_tajuk"],
+                        usia_b,
+                    ),
+                )
 
-        db2.execute("UPDATE drone_sessions SET status='done' WHERE id=?", (sid,))
-        db2.commit()
-        db2.close()
-        _set_progress(sid, 100, f"Selesai! {len(deduped)} lubang terdeteksi.", done=True)
+            db2.execute("UPDATE drone_sessions SET status='done' WHERE id=?", (sid,))
+            db2.commit()
+            _set_progress(sid, 100, f"Selesai! {len(deduped)} lubang terdeteksi.", done=True)
+        finally:
+            db2.close()
 
     except Exception as ex:
         try:

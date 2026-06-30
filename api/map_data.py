@@ -7,6 +7,11 @@ import math
 from flask import Blueprint, jsonify
 from database import get_db
 
+try:
+    from shapely import wkt as shapely_wkt
+except ImportError:
+    shapely_wkt = None
+
 bp = Blueprint("map_data", __name__)
 
 
@@ -96,7 +101,8 @@ def bloks_geojson(bid):
         if not r["geom_wkt"]:
             continue
         try:
-            from shapely import wkt as shapely_wkt
+            if shapely_wkt is None:
+                raise ImportError("shapely not available")
             geom = shapely_wkt.loads(r["geom_wkt"])
             coords = _utm_polygon_to_latlon(geom)
         except Exception:

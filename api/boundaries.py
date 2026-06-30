@@ -35,6 +35,11 @@ def create_boundary():
     f.save(zip_path)
     try:
         with zipfile.ZipFile(zip_path, "r") as z:
+            for member in z.namelist():
+                member_path = os.path.realpath(os.path.join(shp_dir, member))
+                if not member_path.startswith(os.path.realpath(shp_dir)):
+                    shutil.rmtree(shp_dir, ignore_errors=True)
+                    return jsonify({"error": "File zip tidak valid (path traversal)"}), 400
             z.extractall(shp_dir)
         os.remove(zip_path)
         bloks = load_shapefile(shp_dir)
