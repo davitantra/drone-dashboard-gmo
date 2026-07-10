@@ -460,34 +460,145 @@ function renderFrameGrid(frames, holes, sid) {
         frame.video.substring(0, 20) + (frame.video.length > 20 ? '…' : '') +
       '</div>';
     card.addEventListener('click', function() {
-      openFrameModal(frame.url, holes, idx, frames.length);
+      openFrameModal(frames, holes, idx, sid);
     });
     grid.appendChild(card);
   });
 }
 
-function openFrameModal(imgUrl, holes, frameIdx, totalFrames) {
-  const modal = document.getElementById('frame-modal');
-  const img = document.getElementById('modal-img');
-  const info = document.getElementById('modal-info');
-  modal.style.display = '';
-  img.src = imgUrl;
-  info.textContent = 'Frame ' + (frameIdx + 1) + ' / ' + totalFrames +
-    ' · ' + holes.length + ' lubang terdeteksi total dalam sesi ini';
-  img.onload = function() {
-    const canvas = document.getElementById('modal-canvas');
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    // Note: We can't pinpoint exact frame-to-hole mapping without GPS per frame stored.
-    // Show a count instead — canvas overlay is reserved for future GPS-per-frame matching.
-  };
+// ── Review tab frame modal state ──────────────────────────────────────────────
+let _modalFrames = [];
+let _modalHoles  = [];
+let _modalSid    = null;
+let _modalIdx    = 0;
+
+function openFrameModal(frames, holes, idx, sid) {
+  _modalFrames = frames;
+  _modalHoles  = holes;
+  _modalSid    = sid;
+  _modalIdx    = idx;
+  document.getElementById('frame-modal').style.display = '';
+  _renderModalFrame();
+}
+
+function _renderModalFrame() {
+  const frame   = _modalFrames[_modalIdx];
+  const img     = document.getElementById('modal-img');
+  const counter = document.getElementById('modal-frame-counter');
+  counter.textContent = 'Frame ' + (_modalIdx + 1) + ' / ' + _modalFrames.length +
+    (frame.lat ? ' · GPS: ' + frame.lat.toFixed(5) + ', ' + frame.lon.toFixed(5) : ' · GPS tidak tersedia');
+  document.getElementById('modal-info').textContent =
+    _modalHoles.length + ' lubang terdeteksi total dalam sesi ini';
+  img.src = frame.url;
+  img.onload = function() { _drawCanvasOverlay(frame); };
+  if (img.complete && img.naturalWidth) { _drawCanvasOverlay(frame); }
+}
+
+function navigateFrame(dir) {
+  _modalIdx = Math.max(0, Math.min(_modalFrames.length - 1, _modalIdx + dir));
+  _renderModalFrame();
 }
 
 function closeFrameModal() {
   document.getElementById('frame-modal').style.display = 'none';
   document.getElementById('modal-img').src = '';
+}
+
+function _drawCanvasOverlay(frame) {
+  const img    = document.getElementById('modal-img');
+  const canvas = document.getElementById('modal-canvas');
+  canvas.width  = img.offsetWidth  || img.naturalWidth;
+  canvas.height = img.offsetHeight || img.naturalHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (!frame.lat || !frame.lon || !frame.alt) return;
+
+  const HFOV = 84 * Math.PI / 180;
+  const VFOV = 63 * Math.PI / 180;
+  const alt = frame.alt || 30;
+  const fw = 2 * Math.tan(HFOV / 2) * alt;
+  const fh = 2 * Math.tan(VFOV / 2) * alt;
+  const mPerDegLat = 111320;
+  const mPerDegLon = 111320 * Math.cos(frame.lat * Math.PI / 180);
+
+  canvas._visibleHoles = [];
+
+  _modalHoles.forEach(function(f) {
+    const hLat = f.geometry.coordinates[1];
+    const hLon = f.geometry.coordinates[0];
+    const dLat = (hLat - frame.lat) * mPerDegLat;
+    const dLon = (hLon - frame.lon) * mPerDegLon;
+    const px = canvas.width  / 2 + (dLon / fw) * canvas.width;
+    const py = canvas.height / 2 - (dLat / fh) * canvas.height;
+    if (px < 0 || px > canvas.width || py < 0 || py > canvas.height) return;
+
+    const kat = f.properties.kategori_tajuk || 'merah';
+    const color = { hijau: '#27ae60', oranye: '#e67e22', merah: '#e74c3c' }[kat] || '#e74c3c';
+    const r = 10;
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, 2 * Math.PI);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = color + '55';
+    ctx.fill();
+    canvas._visibleHoles.push({ id: f.properties.id, px: px, py: py, r: r, kat: kat });
+  });
+
+  canvas.onclick = function(e) {
+    const rect = canvas.getBoundingClientRect();
+    const cx = (e.clientX - rect.left) * (canvas.width  / rect.width);
+    const cy = (e.clientY - rect.top)  * (canvas.height / rect.height);
+
+    const hit = (canvas._visibleHoles || []).find(function(h) {
+      return Math.hypot(cx - h.px, cy - h.py) <= h.r + 8;
+    });
+
+    if (hit) {
+      if (!confirm('Hapus lubang ini dari analisis?')) return;
+      fetch('/api/sessions/' + _modalSid + '/holes/' + hit.id, { method: 'DELETE' })
+        .then(function(res) {
+          if (res.ok) {
+            _modalHoles = _modalHoles.filter(function(f) { return f.properties.id !== hit.id; });
+            _drawCanvasOverlay(frame);
+            document.getElementById('modal-info').textContent =
+              _modalHoles.length + ' lubang terdeteksi total dalam sesi ini';
+          }
+        });
+    } else {
+      if (!frame.lat || !frame.lon) { alert('GPS tidak tersedia untuk frame ini'); return; }
+      const dLonM = (cx - canvas.width  / 2) / canvas.width  * fw;
+      const dLatM = (canvas.height / 2 - cy) / canvas.height * fh;
+      const mPerDegLat2 = 111320;
+      const mPerDegLon2 = 111320 * Math.cos(frame.lat * Math.PI / 180);
+      const newLat = frame.lat + dLatM / mPerDegLat2;
+      const newLon = frame.lon + dLonM / mPerDegLon2;
+
+      fetch('/api/sessions/' + _modalSid + '/holes/from_pixel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lat: frame.lat, lon: frame.lon, alt: frame.alt,
+          pixel_x: cx, pixel_y: cy,
+          img_w: canvas.width, img_h: canvas.height
+        })
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.id) {
+          _modalHoles.push({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [data.lon, data.lat] },
+            properties: { id: data.id, kategori_tajuk: data.kategori_tajuk }
+          });
+          _drawCanvasOverlay(frame);
+          document.getElementById('modal-info').textContent =
+            _modalHoles.length + ' lubang terdeteksi total dalam sesi ini';
+        }
+      });
+    }
+  };
 }
 
 document.getElementById('frame-modal').addEventListener('click', function(e) {

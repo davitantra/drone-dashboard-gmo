@@ -191,6 +191,7 @@ def _run_pipeline(sid: int):
     vid_dir   = os.path.join(sess_dir, "videos")
     frame_dir = os.path.join(sess_dir, "frames")
     all_holes = []
+    gps_index = {}
 
     try:
         mp4_files = (
@@ -234,6 +235,14 @@ def _run_pipeline(sid: int):
                     continue
                 prev_gps = gps
 
+                # Save GPS index for this frame
+                rel_key = f"session_{sid}/frames/{vname}/{os.path.basename(fpath)}"
+                gps_index[rel_key] = {
+                    "lat": gps["lat"],
+                    "lon": gps["lon"],
+                    "alt": float(gps.get("alt", 30)),
+                }
+
                 # Default usia from first blok; refined per-hole after dedup
                 usia = 0
                 if bloks_db_by_name:
@@ -246,6 +255,11 @@ def _run_pipeline(sid: int):
 
                 holes = detect_holes(fpath, gps["lat"], gps["lon"], gps["alt"], usia, thresholds)
                 all_holes.extend(holes)
+
+        # Save GPS index for all processed frames
+        gps_index_path = os.path.join(sess_dir, "gps_index.json")
+        with open(gps_index_path, "w") as gf:
+            json.dump(gps_index, gf)
 
         _set_progress(sid, 92, "Deduplikasi lubang...")
         deduped = deduplicate(all_holes, cell_m=2.0)
@@ -324,4 +338,116 @@ def list_frames(sid):
                             "video": vdir,
                             "filename": fname,
                         })
+
+    gps_index_path = os.path.join(sess_dir, "gps_index.json")
+    gps_index = {}
+    if os.path.exists(gps_index_path):
+        with open(gps_index_path) as gf:
+            gps_index = json.load(gf)
+
+    for item in result:
+        key = f"session_{sid}/frames/{item['video']}/{item['filename']}"
+        gps_data = gps_index.get(key, {})
+        item["lat"] = gps_data.get("lat")
+        item["lon"] = gps_data.get("lon")
+        item["alt"] = gps_data.get("alt", 30.0)
+
     return jsonify(result)
+
+
+# ──────────────────────────────────────────────
+# DELETE /api/sessions/<sid>/holes/<hole_id>
+# ──────────────────────────────────────────────
+@bp.route("/<int:sid>/holes/<int:hole_id>", methods=["DELETE"])
+def delete_hole(sid, hole_id):
+    db = get_db()
+    row = db.execute("SELECT id FROM lubang_deteksi WHERE id=? AND session_id=?", (hole_id, sid)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({"error": "Not found"}), 404
+    db.execute("DELETE FROM lubang_deteksi WHERE id=?", (hole_id,))
+    db.commit()
+    db.close()
+    return jsonify({"ok": True})
+
+
+# ──────────────────────────────────────────────
+# POST /api/sessions/<sid>/holes/from_pixel
+# ──────────────────────────────────────────────
+@bp.route("/<int:sid>/holes/from_pixel", methods=["POST"])
+def add_hole_from_pixel(sid):
+    from core.gps_projection import pixel_to_gps, wgs84_to_utm50n as _wgs84_to_utm50n
+    from core.canopy_classifier import classify_canopy, get_usia_bulan as _get_usia_bulan
+    data = request.get_json() or {}
+    pixel_x   = data.get("pixel_x", 0)
+    pixel_y   = data.get("pixel_y", 0)
+    img_w     = data.get("img_w", 1920)
+    img_h     = data.get("img_h", 1080)
+    drone_lat = data.get("lat")
+    drone_lon = data.get("lon")
+    alt       = data.get("alt", 30.0)
+
+    if drone_lat is None or drone_lon is None:
+        return jsonify({"error": "GPS tidak tersedia untuk frame ini"}), 400
+
+    hole_lat, hole_lon = pixel_to_gps(pixel_x, pixel_y, drone_lat, drone_lon, alt)
+
+    db = get_db()
+    sess = db.execute(
+        "SELECT tanggal_terbang, boundary_id FROM drone_sessions WHERE id=?", (sid,)
+    ).fetchone()
+    if not sess:
+        db.close()
+        return jsonify({"error": "Session tidak ditemukan"}), 404
+
+    blok_id = None
+    usia_b  = 0
+    if sess["boundary_id"]:
+        bloks_db = db.execute(
+            "SELECT id, nama_area, bulan_tanam, tahun_tanam FROM bloks WHERE boundary_id=?",
+            (sess["boundary_id"],)
+        ).fetchall()
+        if bloks_db:
+            from core.shapefile_manager import find_blok_for_point
+            shp_row = db.execute(
+                "SELECT shp_dir FROM boundaries WHERE id=?", (sess["boundary_id"],)
+            ).fetchone()
+            if shp_row:
+                try:
+                    from core.shapefile_manager import load_shapefile
+                    bloks_geom = load_shapefile(shp_row["shp_dir"])
+                    bloks_db_by_name = {r["nama_area"]: r for r in bloks_db}
+                    e, n = _wgs84_to_utm50n(hole_lat, hole_lon)
+                    idx = find_blok_for_point(e, n, bloks_geom)
+                    if idx is not None:
+                        geom_blok = bloks_geom[idx]
+                        brow = bloks_db_by_name.get(geom_blok["nama_area"])
+                        if brow:
+                            blok_id = brow["id"]
+                            usia_b = _get_usia_bulan(
+                                brow["bulan_tanam"] or "JANUARI",
+                                brow["tahun_tanam"] or 2026,
+                                sess["tanggal_terbang"]
+                            )
+                except Exception:
+                    pass
+
+    thresh_rows = db.execute(
+        "SELECT usia_min_bulan, usia_max_bulan, diameter_min_m FROM canopy_thresholds "
+        "WHERE jenis_tanaman='default' ORDER BY usia_min_bulan"
+    ).fetchall()
+    thresholds = [dict(t) for t in thresh_rows]
+    kategori = classify_canopy(0.0, usia_b, thresholds) if thresholds else "merah"
+
+    cur = db.execute(
+        "INSERT INTO lubang_deteksi (session_id, blok_id, latitude, longitude, "
+        "status_tanam, diameter_tajuk_m, kategori_tajuk, usia_bulan) VALUES (?,?,?,?,?,?,?,?)",
+        (sid, blok_id, hole_lat, hole_lon, "ditanam", None, kategori, usia_b)
+    )
+    new_id = cur.lastrowid
+    db.commit()
+    db.close()
+    return jsonify({
+        "id": new_id, "lat": hole_lat, "lon": hole_lon,
+        "blok_id": blok_id, "kategori_tajuk": kategori, "usia_bulan": usia_b
+    }), 201
