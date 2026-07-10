@@ -1,4 +1,4 @@
-import os, json, threading, time, glob
+import os, json, threading, time, glob, shutil
 from datetime import datetime
 from flask import Blueprint, request, jsonify, Response
 from database import get_db
@@ -76,6 +76,25 @@ def create_session():
     db.close()
 
     return jsonify({"id": sid, "nama": nama, "status": "pending"}), 201
+
+
+# ──────────────────────────────────────────────
+# DELETE /api/sessions/<sid>
+# ──────────────────────────────────────────────
+@bp.route("/<int:sid>", methods=["DELETE"])
+def delete_session(sid):
+    from config import UPLOAD_DIR
+    db = get_db()
+    row = db.execute("SELECT id FROM drone_sessions WHERE id=?", (sid,)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({"error": "Not found"}), 404
+    sess_dir = os.path.join(UPLOAD_DIR, f"session_{sid}")
+    shutil.rmtree(sess_dir, ignore_errors=True)
+    db.execute("DELETE FROM drone_sessions WHERE id=?", (sid,))
+    db.commit()
+    db.close()
+    return jsonify({"ok": True})
 
 
 # ──────────────────────────────────────────────

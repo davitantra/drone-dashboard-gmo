@@ -165,6 +165,7 @@ function renderSessionList(sessions) {
       '<div class="session-card-actions">' +
         (s.status === 'pending' ? '<button class="btn btn-sm" onclick="processSession(' + s.id + ')">▶ Proses</button>' : '') +
         (s.status === 'done' ? '<button class="btn btn-sm btn-outline" onclick="viewSession(' + s.id + ')">🗺️ Lihat</button>' : '') +
+        '<button class="btn btn-sm btn-danger" onclick="deleteSession(' + s.id + ')" title="Hapus sesi">🗑</button>' +
       '</div>';
     container.appendChild(card);
   });
@@ -298,11 +299,41 @@ function renderBoundaryList(bounds) {
         (b.deskripsi ? '<p style="color:#aaa">' + b.deskripsi + '</p>' : '') +
       '</div>' +
       '<div class="boundary-card-actions">' +
+        '<button class="btn btn-sm btn-outline" onclick="toggleBlokPanel(' + b.id + ')">📋 Blok</button>' +
         '<button class="btn btn-sm btn-outline" onclick="editBoundary(' + b.id + ', \'' + (b.nama || '').replace(/'/g, "\\'") + '\', \'' + (b.deskripsi || '').replace(/'/g, "\\'") + '\')">✏️ Edit</button>' +
         '<button class="btn btn-sm btn-danger" onclick="deleteBoundary(' + b.id + ')">🗑️ Hapus</button>' +
       '</div>';
+    const blokPanel = document.createElement('div');
+    blokPanel.id = 'blok-panel-' + b.id;
+    blokPanel.style.display = 'none';
+    blokPanel.style.cssText = 'padding:8px 16px 12px;border-top:1px solid #f0f0f0';
+    blokPanel.innerHTML = '<div id="blok-panel-content-' + b.id + '" style="font-size:12px;color:#888">Memuat...</div>';
+    card.style.flexWrap = 'wrap';
+    card.appendChild(blokPanel);
     container.appendChild(card);
   });
+}
+
+async function toggleBlokPanel(bid) {
+  const panel = document.getElementById('blok-panel-' + bid);
+  if (!panel) return;
+  if (panel.style.display !== 'none') { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  const content = document.getElementById('blok-panel-content-' + bid);
+  try {
+    const bloks = await (await fetch('/api/boundaries/' + bid + '/bloks')).json();
+    if (!bloks.length) { content.innerHTML = '<em>Tidak ada blok.</em>'; return; }
+    content.innerHTML = '<table style="width:100%;font-size:11px;border-collapse:collapse">' +
+      '<thead><tr><th style="text-align:left;padding:4px 8px;background:#f5f7fa">Nama Area</th><th style="text-align:left;padding:4px 8px;background:#f5f7fa">Luas (ha)</th><th style="text-align:left;padding:4px 8px;background:#f5f7fa">Target Lubang</th><th style="padding:4px 8px;background:#f5f7fa"></th></tr></thead>' +
+      '<tbody>' + bloks.map(function(blok) {
+        return '<tr>' +
+          '<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0">' + blok.nama_area + '</td>' +
+          '<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0">' + blok.luas_ha + '</td>' +
+          '<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0">' + blok.target_lubang + '</td>' +
+          '<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0"><button class="btn btn-sm btn-danger" onclick="deleteBlok(' + bid + ',' + blok.id + ')">🗑 Hapus Blok</button></td>' +
+          '</tr>';
+      }).join('') + '</tbody></table>';
+  } catch(e) { content.innerHTML = '<em>Gagal memuat blok.</em>'; }
 }
 
 async function editBoundary(id, nama, desc) {
@@ -321,6 +352,29 @@ async function deleteBoundary(id) {
   if (!confirm('Hapus boundary ini? Semua data blok akan ikut terhapus.')) return;
   await fetch('/api/boundaries/' + id, { method: 'DELETE' });
   loadBoundaries();
+}
+
+async function deleteSession(id) {
+  if (!confirm('Hapus sesi ini beserta semua data deteksi lubang? Tindakan ini tidak dapat dibatalkan.')) return;
+  try {
+    const res = await fetch('/api/sessions/' + id, { method: 'DELETE' });
+    if (!res.ok) { alert('Gagal menghapus sesi'); return; }
+    loadSessions();
+    if (currentSessionId == id) {
+      currentSessionId = null;
+      holesLayer.clearLayers();
+      document.getElementById('stats-panel').style.display = 'none';
+    }
+  } catch(e) { console.error('deleteSession error:', e); }
+}
+
+async function deleteBlok(boundaryId, blokId) {
+  if (!confirm('Hapus blok ini dari database? Shapefile asli tidak berubah.')) return;
+  const res = await fetch('/api/boundaries/' + boundaryId + '/bloks/' + blokId, { method: 'DELETE' });
+  if (res.ok) {
+    loadBoundaries();
+    if (currentBoundaryId == boundaryId) loadBloks(currentBoundaryId);
+  }
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────

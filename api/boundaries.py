@@ -99,3 +99,19 @@ def list_bloks(bid):
     ).fetchall()
     db.close()
     return jsonify([dict(r) for r in rows])
+
+@bp.route("/<int:bid>/bloks/<int:blok_id>", methods=["DELETE"])
+def delete_blok(bid, blok_id):
+    db = get_db()
+    row = db.execute("SELECT id FROM bloks WHERE id=? AND boundary_id=?", (blok_id, bid)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({"error": "Not found"}), 404
+    db.execute("DELETE FROM bloks WHERE id=?", (blok_id,))
+    db.execute(
+        "UPDATE boundaries SET jumlah_blok=(SELECT COUNT(*) FROM bloks WHERE boundary_id=?), updated_at=? WHERE id=?",
+        (bid, datetime.utcnow().isoformat(), bid)
+    )
+    db.commit()
+    db.close()
+    return jsonify({"ok": True})
