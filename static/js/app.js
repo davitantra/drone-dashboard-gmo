@@ -356,8 +356,22 @@ async function editBoundary(id, nama, desc) {
 
 async function deleteBoundary(id) {
   if (!confirm('Hapus boundary ini? Semua data blok akan ikut terhapus.')) return;
-  await fetch('/api/boundaries/' + id, { method: 'DELETE' });
-  loadBoundaries();
+  try {
+    const res = await fetch('/api/boundaries/' + id, { method: 'DELETE' });
+    if (!res.ok) {
+      const err = await res.json().catch(function() { return {}; });
+      alert('Gagal menghapus: ' + (err.error || res.status));
+      return;
+    }
+    if (currentBoundaryId == id) {
+      currentBoundaryId = null;
+      bloksLayer.clearLayers();
+      document.getElementById('bottom-table').style.display = 'none';
+    }
+    loadBoundaries();
+  } catch(e) {
+    alert('Gagal menghapus boundary: ' + e.message);
+  }
 }
 
 async function deleteSession(id) {

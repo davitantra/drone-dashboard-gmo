@@ -78,7 +78,7 @@ function loadBloks(boundaryId) {
   fetch('/api/map/bloks/' + boundaryId)
     .then(function(r) { return r.json(); })
     .then(function(geojson) {
-      L.geoJSON(geojson, {
+      var gjLayer = L.geoJSON(geojson, {
         style: function(f) {
           var c = f.properties.color || 'merah';
           return { color: WARNA[c] || '#888', weight: 2, fillOpacity: 0.35, fillColor: WARNA_FILL[c] || WARNA_FILL.merah };
@@ -93,8 +93,9 @@ function loadBloks(boundaryId) {
           );
         }
       }).addTo(bloksLayer);
-      if (bloksLayer.getLayers().length > 0) {
-        map.fitBounds(bloksLayer.getBounds(), { padding: [30, 30] });
+      // Use gjLayer.getBounds() — bloksLayer is L.layerGroup which lacks getBounds()
+      if (gjLayer.getLayers().length > 0) {
+        map.fitBounds(gjLayer.getBounds(), { padding: [30, 30] });
       }
     })
     .catch(function(err) { console.warn('loadBloks error:', err); });
