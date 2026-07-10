@@ -85,6 +85,7 @@ def delete_boundary(bid):
         db.close()
         return jsonify({"error": "Not found"}), 404
     shutil.rmtree(row["shp_dir"], ignore_errors=True)
+    db.execute("UPDATE drone_sessions SET boundary_id=NULL WHERE boundary_id=?", (bid,))
     db.execute("DELETE FROM boundaries WHERE id=?", (bid,))
     db.commit()
     db.close()

@@ -168,13 +168,8 @@ try:
     _transformer = Transformer.from_crs("EPSG:32650", "EPSG:4326", always_xy=True)
 
     def _utm_to_wgs84(easting: float, northing: float):
-        """Konversi UTM 50N → (lon, lat) WGS84.
-        Karena shapefile menyimpan northing positif (southern-hemisphere convention),
-        kita NEGASIKAN latitude output agar peta Leaflet menampilkan posisi yang benar.
-        """
+        """Konversi UTM 50N → (lon, lat) WGS84 via pyproj EPSG:32650."""
         lon, lat = _transformer.transform(easting, northing)
-        # Negate lat: shapefile uses positive northing for a ~-2.13° S site
-        lat = -abs(lat)
         return lon, lat
 
 except ImportError:
@@ -212,7 +207,7 @@ except ImportError:
             + (5 - 2 * C1 + 28 * T1 - 3 * C1 ** 2 + 8 * (_e2 / (1 - _e2)) + 24 * T1 ** 2) * D ** 5 / 120
         ) / math.cos(phi1)
         lon_deg = math.degrees(lon)
-        lat_deg = -abs(math.degrees(lat))  # negate for southern-hemisphere convention
+        lat_deg = math.degrees(lat)
         return lon_deg, lat_deg
 
 

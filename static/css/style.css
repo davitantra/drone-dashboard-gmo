@@ -77,5 +77,9 @@ tr:hover td { background: #fafbff; }
 
 /* SETTINGS TAB */
 #tab-settings { overflow-y: auto; }
+
+/* REVIEW TAB */
+#tab-review { overflow-y: auto; flex-direction: column; }
+#tab-review .section { padding: 20px; width: 100%; }
 .settings-page .panel { background: white; border-radius: 8px; padding: 16px; margin-bottom: 12px; border: 1px solid #e0e0e0; }
 .settings-page label { display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px; color: #555; }
