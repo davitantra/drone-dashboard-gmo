@@ -93,6 +93,9 @@ function loadBloks(boundaryId) {
           );
         }
       }).addTo(bloksLayer);
+      if (bloksLayer.getLayers().length > 0) {
+        map.fitBounds(bloksLayer.getBounds(), { padding: [30, 30] });
+      }
     })
     .catch(function(err) { console.warn('loadBloks error:', err); });
 }

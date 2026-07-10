@@ -263,11 +263,18 @@ document.getElementById('btn-save-boundary').addEventListener('click', async fun
   fd.append('file', file);
   const res = await fetch('/api/boundaries', { method: 'POST', body: fd });
   if (res.ok) {
+    const data = await res.json();
     document.getElementById('add-boundary-form').style.display = 'none';
     document.getElementById('bnd-nama').value = '';
     document.getElementById('bnd-desc').value = '';
     document.getElementById('bnd-filename').textContent = '';
     loadBoundaries();
+    // Switch to Peta tab and load the new boundary onto the map
+    document.querySelectorAll('.nav-tab').forEach(function(t) { t.classList.remove('active'); });
+    document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+    document.querySelector('.nav-tab[data-tab="peta"]').classList.add('active');
+    document.getElementById('tab-peta').classList.add('active');
+    setTimeout(function() { map.invalidateSize(); loadBloks(data.id); }, 100);
   } else {
     const err = await res.json();
     alert('Error: ' + (err.error || 'Upload gagal'));

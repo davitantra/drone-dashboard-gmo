@@ -193,6 +193,7 @@ def _run_pipeline(sid: int):
             gps_data = parse_srt(srt_path) if os.path.exists(srt_path) else []
             fps_src  = 47.95  # typical DJI sensor fps
 
+            prev_gps = None
             for fi, fpath in enumerate(frames):
                 pct = 40 + int(
                     (vi * len(frames) + fi) / max(len(mp4_files) * max(len(frames), 1), 1) * 50
@@ -208,6 +209,11 @@ def _run_pipeline(sid: int):
                 )
                 if gps is None:
                     continue
+
+                # Skip if GPS coordinates haven't changed from previous frame (GPS freeze artifact)
+                if prev_gps is not None and gps["lat"] == prev_gps["lat"] and gps["lon"] == prev_gps["lon"]:
+                    continue
+                prev_gps = gps
 
                 # Default usia from first blok; refined per-hole after dedup
                 usia = 0
