@@ -15,6 +15,7 @@
     <button class="nav-tab" data-tab="boundary">📁 Boundary</button>
     <button class="nav-tab" data-tab="sesi">📹 Sesi Drone</button>
     <button class="nav-tab" data-tab="settings">⚙️ Pengaturan</button>
+    <button class="nav-tab" data-tab="review">🔍 Review</button>
   </div>
   <span class="server-info" id="server-info">● localhost:5000</span>
 </nav>
@@ -141,6 +142,31 @@
           <tr><td>12+ bulan</td><td>12 – 999</td><td>≥ 1.00</td></tr>
         </tbody>
       </table>
+    </div>
+  </div>
+</div>
+
+<!-- TAB REVIEW -->
+<div id="tab-review" class="tab-content">
+  <div class="section">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+      <h3 style="margin:0">Review Deteksi per Frame</h3>
+      <select id="review-session-select" class="input-field" style="max-width:280px">
+        <option value="">-- Pilih Sesi --</option>
+      </select>
+      <span id="review-status" style="font-size:12px;color:#888"></span>
+    </div>
+    <div id="frame-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px"></div>
+    <!-- Modal for full-size frame view -->
+    <div id="frame-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;overflow:auto">
+      <div style="position:relative;max-width:900px;margin:40px auto;padding:16px">
+        <button onclick="closeFrameModal()" style="position:absolute;top:-8px;right:0;background:#fff;border:none;font-size:20px;cursor:pointer;border-radius:50%;width:32px;height:32px">✕</button>
+        <div style="position:relative;display:inline-block;width:100%">
+          <img id="modal-img" src="" style="width:100%;display:block;border-radius:4px">
+          <canvas id="modal-canvas" style="position:absolute;top:0;left:0;width:100%;height:100%"></canvas>
+        </div>
+        <div id="modal-info" style="color:#fff;margin-top:8px;font-size:13px"></div>
+      </div>
     </div>
   </div>
 </div>

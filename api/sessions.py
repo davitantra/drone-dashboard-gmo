@@ -301,3 +301,27 @@ def _run_pipeline(sid: int):
         except Exception:
             pass
         _set_progress(sid, 0, f"Error: {str(ex)}", done=True)
+
+
+# ──────────────────────────────────────────────
+# GET /api/sessions/<sid>/frames
+# ──────────────────────────────────────────────
+@bp.route("/<int:sid>/frames", methods=["GET"])
+def list_frames(sid):
+    from config import UPLOAD_DIR
+    import glob as glob_mod
+    sess_dir = os.path.join(UPLOAD_DIR, f"session_{sid}")
+    frame_dir = os.path.join(sess_dir, "frames")
+    result = []
+    if os.path.isdir(frame_dir):
+        for vdir in sorted(os.listdir(frame_dir)):
+            vpath = os.path.join(frame_dir, vdir)
+            if os.path.isdir(vpath):
+                for fname in sorted(os.listdir(vpath)):
+                    if fname.lower().endswith('.jpg'):
+                        result.append({
+                            "url": f"/data/uploads/session_{sid}/frames/{vdir}/{fname}",
+                            "video": vdir,
+                            "filename": fname,
+                        })
+    return jsonify(result)

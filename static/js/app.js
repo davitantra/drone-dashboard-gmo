@@ -10,6 +10,7 @@ document.querySelectorAll('.nav-tab').forEach(function(tab) {
     tab.classList.add('active');
     document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
     if (tab.dataset.tab === 'peta') { setTimeout(function() { map.invalidateSize(); }, 100); }
+    if (tab.dataset.tab === 'review') { loadReviewSessions(); }
   });
 });
 
@@ -385,6 +386,98 @@ async function deleteBlok(boundaryId, blokId) {
 // ── Settings ──────────────────────────────────────────────────────────────────
 document.getElementById('btn-save-settings').addEventListener('click', function() {
   alert('Pengaturan disimpan (belum ada API settings).');
+});
+
+// ── Review Tab ────────────────────────────────────────────────────────────────
+async function loadReviewSessions() {
+  try {
+    const res = await fetch('/api/sessions');
+    const sessions = await res.json();
+    const sel = document.getElementById('review-session-select');
+    sel.innerHTML = '<option value="">-- Pilih Sesi --</option>';
+    sessions.filter(s => s.status === 'done').forEach(function(s) {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = s.nama + ' (' + s.tanggal_terbang + ')';
+      sel.appendChild(opt);
+    });
+  } catch(e) { console.warn('loadReviewSessions error:', e); }
+}
+
+document.getElementById('review-session-select').addEventListener('change', async function(e) {
+  const sid = e.target.value;
+  const grid = document.getElementById('frame-grid');
+  const status = document.getElementById('review-status');
+  grid.innerHTML = '';
+  if (!sid) return;
+  status.textContent = 'Memuat frame...';
+  try {
+    const [framesRes, holesRes] = await Promise.all([
+      fetch('/api/sessions/' + sid + '/frames'),
+      fetch('/api/map/' + sid)
+    ]);
+    const frames = await framesRes.json();
+    const holesGeoJSON = await holesRes.json();
+    const holes = holesGeoJSON.features || [];
+    status.textContent = frames.length + ' frame, ' + holes.length + ' lubang terdeteksi';
+    renderFrameGrid(frames, holes, sid);
+  } catch(e) {
+    console.warn('review load error:', e);
+    status.textContent = 'Error memuat data';
+  }
+});
+
+function renderFrameGrid(frames, holes, sid) {
+  const grid = document.getElementById('frame-grid');
+  grid.innerHTML = '';
+  if (!frames.length) {
+    grid.innerHTML = '<p style="color:#888;font-size:12px">Tidak ada frame tersimpan untuk sesi ini.</p>';
+    return;
+  }
+  frames.forEach(function(frame, idx) {
+    const card = document.createElement('div');
+    card.style.cssText = 'border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;cursor:pointer;background:#fff';
+    card.innerHTML =
+      '<img src="' + frame.url + '" style="width:100%;height:140px;object-fit:cover;display:block" ' +
+      'onerror="this.style.background=\'#f5f5f5\';this.alt=\'Frame tidak tersedia\'" ' +
+      'loading="lazy">' +
+      '<div style="padding:6px 8px;font-size:11px;color:#555">' +
+        '<b>Frame ' + (idx + 1) + '</b><br>' +
+        frame.video.substring(0, 20) + (frame.video.length > 20 ? '…' : '') +
+      '</div>';
+    card.addEventListener('click', function() {
+      openFrameModal(frame.url, holes, idx, frames.length);
+    });
+    grid.appendChild(card);
+  });
+}
+
+function openFrameModal(imgUrl, holes, frameIdx, totalFrames) {
+  const modal = document.getElementById('frame-modal');
+  const img = document.getElementById('modal-img');
+  const info = document.getElementById('modal-info');
+  modal.style.display = '';
+  img.src = imgUrl;
+  info.textContent = 'Frame ' + (frameIdx + 1) + ' / ' + totalFrames +
+    ' · ' + holes.length + ' lubang terdeteksi total dalam sesi ini';
+  img.onload = function() {
+    const canvas = document.getElementById('modal-canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Note: We can't pinpoint exact frame-to-hole mapping without GPS per frame stored.
+    // Show a count instead — canvas overlay is reserved for future GPS-per-frame matching.
+  };
+}
+
+function closeFrameModal() {
+  document.getElementById('frame-modal').style.display = 'none';
+  document.getElementById('modal-img').src = '';
+}
+
+document.getElementById('frame-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeFrameModal();
 });
 
 // ── Load awal ─────────────────────────────────────────────────────────────────
