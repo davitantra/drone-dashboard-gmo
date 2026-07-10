@@ -19,6 +19,37 @@ bp = Blueprint("map_data", __name__)
 # Route: titik lubang per sesi
 # ---------------------------------------------------------------------------
 
+@bp.route("/all", methods=["GET"])
+def holes_all():
+    db = get_db()
+    rows = db.execute(
+        "SELECT ld.id, ld.session_id, ld.blok_id, ld.latitude, ld.longitude, "
+        "ld.status_tanam, ld.diameter_tajuk_m, ld.kategori_tajuk, ld.usia_bulan, "
+        "ds.nama AS session_nama, ds.tanggal_terbang "
+        "FROM lubang_deteksi ld "
+        "JOIN drone_sessions ds ON ld.session_id = ds.id"
+    ).fetchall()
+    db.close()
+    features = []
+    for r in rows:
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [r["longitude"], r["latitude"]]},
+            "properties": {
+                "id": r["id"],
+                "session_id": r["session_id"],
+                "session_nama": r["session_nama"],
+                "tanggal_terbang": r["tanggal_terbang"],
+                "status_tanam": r["status_tanam"],
+                "kategori_tajuk": r["kategori_tajuk"],
+                "diameter_tajuk_m": r["diameter_tajuk_m"],
+                "usia_bulan": r["usia_bulan"],
+                "blok_id": r["blok_id"],
+            }
+        })
+    return jsonify({"type": "FeatureCollection", "features": features})
+
+
 @bp.route("/<int:sid>", methods=["GET"])
 def holes_geojson(sid):
     db = get_db()

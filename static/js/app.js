@@ -20,6 +20,10 @@ async function loadSessions() {
     const sessions = await res.json();
     const sel = document.getElementById('session-select');
     sel.innerHTML = '<option value="">-- Pilih sesi --</option>';
+    const allOpt = document.createElement('option');
+    allOpt.value = 'all';
+    allOpt.textContent = '-- Semua Sesi --';
+    sel.appendChild(allOpt);
     sessions.forEach(function(s) {
       const opt = document.createElement('option');
       opt.value = s.id;
@@ -52,7 +56,8 @@ async function loadBoundaries() {
 // ── Peta session & boundary select ───────────────────────────────────────────
 document.getElementById('session-select').addEventListener('change', function(e) {
   currentSessionId = e.target.value;
-  if (currentSessionId) loadHoles(currentSessionId);
+  if (currentSessionId === 'all') loadHoles('all');
+  else if (currentSessionId) loadHoles(currentSessionId);
   else document.getElementById('stats-panel').style.display = 'none';
 });
 

@@ -1,5 +1,6 @@
-from flask import Flask, render_template
+from flask import Flask, render_template, send_from_directory
 from database import init_db
+from config import UPLOAD_DIR
 from api.boundaries import bp as boundaries_bp
 from api.sessions import bp as sessions_bp
 from api.map_data import bp as map_bp
@@ -15,6 +16,10 @@ def create_app():
     @app.route("/")
     def index():
         return render_template("index.html")
+
+    @app.route("/data/uploads/<path:filename>")
+    def serve_upload(filename):
+        return send_from_directory(UPLOAD_DIR, filename)
 
     return app
 

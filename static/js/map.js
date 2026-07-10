@@ -35,7 +35,8 @@ const WARNA_FILL = {
 function loadHoles(sessionId) {
   holesLayer.clearLayers();
   if (!sessionId) return;
-  fetch('/api/map/' + sessionId)
+  const url = (sessionId === 'all') ? '/api/map/all' : '/api/map/' + sessionId;
+  fetch(url)
     .then(function(r) { return r.json(); })
     .then(function(geojson) {
       const counts = { hijau: 0, oranye: 0, merah: 0 };
@@ -49,11 +50,10 @@ function loadHoles(sessionId) {
           { radius: 5, fillColor: WARNA[kat] || '#888', color: '#fff', weight: 1, fillOpacity: 0.85 }
         );
         marker.bindPopup(
+          (p.session_nama ? '<b>Sesi: ' + p.session_nama + '</b><br>' : '') +
           '<b>' + kat.toUpperCase() + '</b><br>' +
-          'Status: ' + (p.status_tanam || '—') + '<br>' +
-          'Tajuk: ' + (p.diameter_tajuk_m ? parseFloat(p.diameter_tajuk_m).toFixed(2) + ' m' : 'tidak terdeteksi') + '<br>' +
-          'Usia: ' + (p.usia_bulan !== null && p.usia_bulan !== undefined ? p.usia_bulan : '—') + ' bulan<br>' +
-          '<a href="https://maps.google.com/?q=' + f.geometry.coordinates[1] + ',' + f.geometry.coordinates[0] + '" target="_blank">Google Maps</a>'
+          'Diameter: ' + (p.diameter_tajuk_m ? parseFloat(p.diameter_tajuk_m).toFixed(2) + ' m' : '—') + '<br>' +
+          'Usia: ' + (p.usia_bulan || '—') + ' bln'
         );
         holesLayer.addLayer(marker);
       });
