@@ -485,6 +485,7 @@ let _modalHoles   = [];
 let _modalSid     = null;
 let _modalIdx     = 0;
 let _modalChanged = false;
+let _activeHole   = null;
 
 function openFrameModal(frames, holes, idx, sid) {
   _modalFrames = frames;
@@ -533,6 +534,7 @@ function navigateFrame(dir) {
 }
 
 function closeFrameModal() {
+  closeHolePopup();
   if (_modalChanged && _modalSid && _modalFrames[_modalIdx]) {
     const f = _modalFrames[_modalIdx];
     fetch('/api/sessions/' + _modalSid + '/reviewed-frames', {
@@ -565,6 +567,7 @@ function _drawCanvasOverlay(frame) {
   const mPerDegLon = 111320 * Math.cos(frame.lat * Math.PI / 180);
 
   canvas._visibleHoles = [];
+  canvas._frame = frame;
 
   _modalHoles.forEach(function(f) {
     const hLat = f.geometry.coordinates[1];
@@ -575,20 +578,41 @@ function _drawCanvasOverlay(frame) {
     const py = canvas.height / 2 - (dLat / fh) * canvas.height;
     if (px < 0 || px > canvas.width || py < 0 || py > canvas.height) return;
 
-    const kat = f.properties.kategori_tajuk || 'merah';
-    const color = { hijau: '#27ae60', oranye: '#e67e22', merah: '#e74c3c' }[kat] || '#e74c3c';
+    const kat    = f.properties.kategori_tajuk || 'merah';
+    const status = f.properties.status_tanam   || 'kosong';
+    const color  = { hijau: '#27ae60', oranye: '#e67e22', merah: '#e74c3c' }[kat] || '#e74c3c';
     const r = 10;
     ctx.beginPath();
     ctx.arc(px, py, r, 0, 2 * Math.PI);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.fillStyle = color + '55';
-    ctx.fill();
-    canvas._visibleHoles.push({ id: f.properties.id, px: px, py: py, r: r, kat: kat });
+    if (status === 'ditanam') {
+      // Solid filled circle — confirmed planted
+      ctx.setLineDash([]);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.fillStyle = color + '66';
+      ctx.fill();
+    } else {
+      // Dashed gray circle — empty/unplanted
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = '#888';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    // Label: D or K
+    ctx.fillStyle = status === 'ditanam' ? color : '#888';
+    ctx.font = 'bold 9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(status === 'ditanam' ? 'D' : 'K', px, py);
+
+    canvas._visibleHoles.push({ id: f.properties.id, px, py, r, kat, status });
   });
+  ctx.setLineDash([]);
 
   canvas.onclick = function(e) {
+    closeHolePopup();
     const rect = canvas.getBoundingClientRect();
     const cx = (e.clientX - rect.left) * (canvas.width  / rect.width);
     const cy = (e.clientY - rect.top)  * (canvas.height / rect.height);
@@ -598,27 +622,17 @@ function _drawCanvasOverlay(frame) {
     });
 
     if (hit) {
-      if (!confirm('Hapus lubang ini dari analisis?')) return;
-      fetch('/api/sessions/' + _modalSid + '/holes/' + hit.id, { method: 'DELETE' })
-        .then(function(res) {
-          if (res.ok) {
-            _modalChanged = true;
-            _modalHoles = _modalHoles.filter(function(f) { return f.properties.id !== hit.id; });
-            _drawCanvasOverlay(frame);
-            document.getElementById('modal-info').textContent =
-              _modalHoles.length + ' lubang terdeteksi total dalam sesi ini';
-          }
-        });
+      // Show action popup near click position (in CSS %)
+      _activeHole = hit;
+      const popup = document.getElementById('hole-action-popup');
+      const pctX  = (cx / canvas.width  * 100).toFixed(1);
+      const pctY  = (cy / canvas.height * 100).toFixed(1);
+      popup.style.left = pctX + '%';
+      popup.style.top  = pctY + '%';
+      popup.style.display = '';
     } else {
+      // Add new hole at click position
       if (!frame.lat || !frame.lon) { alert('GPS tidak tersedia untuk frame ini'); return; }
-      const dLonM = (cx - canvas.width  / 2) / canvas.width  * fw;
-      const dLatM = (canvas.height / 2 - cy) / canvas.height * fh;
-      const mPerDegLat2 = 111320;
-      const mPerDegLon2 = 111320 * Math.cos(frame.lat * Math.PI / 180);
-      const newLat = frame.lat + dLatM / mPerDegLat2;
-      const newLon = frame.lon + dLonM / mPerDegLon2;
-
-      // Scale canvas display coords → source image coords (1920×1080) for pixel_to_gps
       const img2 = document.getElementById('modal-img');
       const srcX = cx / canvas.width  * (img2.naturalWidth  || 1920);
       const srcY = cy / canvas.height * (img2.naturalHeight || 1080);
@@ -639,15 +653,53 @@ function _drawCanvasOverlay(frame) {
           _modalHoles.push({
             type: 'Feature',
             geometry: { type: 'Point', coordinates: [data.lon, data.lat] },
-            properties: { id: data.id, kategori_tajuk: data.kategori_tajuk }
+            properties: { id: data.id, kategori_tajuk: data.kategori_tajuk, status_tanam: 'ditanam' }
           });
           _drawCanvasOverlay(frame);
-          document.getElementById('modal-info').textContent =
-            _modalHoles.length + ' lubang terdeteksi total dalam sesi ini';
+          document.getElementById('modal-info').textContent = _modalHoles.length + ' lubang di frame ini';
         }
       });
     }
   };
+}
+
+function closeHolePopup() {
+  document.getElementById('hole-action-popup').style.display = 'none';
+  _activeHole = null;
+}
+
+function setHoleStatus(status) {
+  if (!_activeHole) return;
+  const holeId = _activeHole.id;
+  closeHolePopup();
+  fetch('/api/sessions/' + _modalSid + '/holes/' + holeId, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status_tanam: status })
+  }).then(function(res) {
+    if (res.ok) {
+      _modalChanged = true;
+      var f = _modalHoles.find(function(x) { return x.properties.id === holeId; });
+      if (f) f.properties.status_tanam = status;
+      _drawCanvasOverlay(canvas._frame);
+    }
+  });
+}
+
+function deleteHoleFromPopup() {
+  if (!_activeHole) return;
+  const holeId = _activeHole.id;
+  closeHolePopup();
+  if (!confirm('Hapus lubang ini dari analisis?')) return;
+  fetch('/api/sessions/' + _modalSid + '/holes/' + holeId, { method: 'DELETE' })
+    .then(function(res) {
+      if (res.ok) {
+        _modalChanged = true;
+        _modalHoles = _modalHoles.filter(function(f) { return f.properties.id !== holeId; });
+        _drawCanvasOverlay(canvas._frame);
+        document.getElementById('modal-info').textContent = _modalHoles.length + ' lubang di frame ini';
+      }
+    });
 }
 
 document.getElementById('frame-modal').addEventListener('click', function(e) {

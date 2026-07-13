@@ -419,6 +419,26 @@ def frame_holes(sid):
 
 
 # ──────────────────────────────────────────────
+# PATCH /api/sessions/<sid>/holes/<hole_id>
+# ──────────────────────────────────────────────
+@bp.route("/<int:sid>/holes/<int:hole_id>", methods=["PATCH"])
+def update_hole(sid, hole_id):
+    data = request.get_json() or {}
+    status = data.get("status_tanam")
+    if status not in ("ditanam", "kosong"):
+        return jsonify({"error": "status_tanam must be 'ditanam' or 'kosong'"}), 400
+    db = get_db()
+    row = db.execute("SELECT id FROM lubang_deteksi WHERE id=? AND session_id=?", (hole_id, sid)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({"error": "Not found"}), 404
+    db.execute("UPDATE lubang_deteksi SET status_tanam=?, source='manual' WHERE id=?", (status, hole_id))
+    db.commit()
+    db.close()
+    return jsonify({"ok": True})
+
+
+# ──────────────────────────────────────────────
 # DELETE /api/sessions/<sid>/holes/<hole_id>
 # ──────────────────────────────────────────────
 @bp.route("/<int:sid>/holes/<int:hole_id>", methods=["DELETE"])

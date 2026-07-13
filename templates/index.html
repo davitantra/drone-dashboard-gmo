@@ -178,6 +178,14 @@
         <div style="position:relative;display:inline-block;width:100%">
           <img id="modal-img" src="" style="width:100%;display:block;border-radius:4px;user-select:none">
           <canvas id="modal-canvas" style="position:absolute;top:0;left:0;width:100%;height:100%;cursor:crosshair"></canvas>
+          <div id="hole-action-popup" style="display:none;position:absolute;background:#fff;border:1px solid #ddd;border-radius:8px;padding:8px;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,0.25);white-space:nowrap">
+            <div style="font-size:10px;color:#888;margin-bottom:6px;font-weight:600">TANDAI LUBANG INI</div>
+            <div style="display:flex;gap:6px">
+              <button onclick="setHoleStatus('ditanam')" style="background:#27ae60;color:#fff;border:none;border-radius:5px;padding:5px 10px;cursor:pointer;font-size:11px;font-weight:600">🌱 Ditanam</button>
+              <button onclick="setHoleStatus('kosong')"  style="background:#7f8c8d;color:#fff;border:none;border-radius:5px;padding:5px 10px;cursor:pointer;font-size:11px;font-weight:600">⬜ Kosong</button>
+              <button onclick="deleteHoleFromPopup()"    style="background:#e74c3c;color:#fff;border:none;border-radius:5px;padding:5px 10px;cursor:pointer;font-size:11px;font-weight:600">🗑 Hapus</button>
+            </div>
+          </div>
         </div>
         <div id="modal-info" style="color:#fff;margin-top:8px;font-size:12px"></div>
       </div>
