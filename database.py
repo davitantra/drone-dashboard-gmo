@@ -77,4 +77,24 @@ def init_db():
             ]
         )
     conn.commit()
+
+    # Migrate: add source column to lubang_deteksi if not present
+    try:
+        conn.execute("ALTER TABLE lubang_deteksi ADD COLUMN source TEXT DEFAULT 'auto'")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    # Create reviewed_frames table if not exists
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS reviewed_frames (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL REFERENCES drone_sessions(id) ON DELETE CASCADE,
+            video      TEXT NOT NULL,
+            filename   TEXT NOT NULL,
+            reviewed_at TEXT NOT NULL,
+            UNIQUE(session_id, video, filename)
+        )
+    """)
+    conn.commit()
     conn.close()

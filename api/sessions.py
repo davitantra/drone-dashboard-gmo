@@ -1,4 +1,4 @@
-import os, json, threading, time, glob, shutil
+import os, json, math, threading, time, glob, shutil
 from datetime import datetime
 from flask import Blueprint, request, jsonify, Response
 from database import get_db
@@ -441,8 +441,8 @@ def add_hole_from_pixel(sid):
 
     cur = db.execute(
         "INSERT INTO lubang_deteksi (session_id, blok_id, latitude, longitude, "
-        "status_tanam, diameter_tajuk_m, kategori_tajuk, usia_bulan) VALUES (?,?,?,?,?,?,?,?)",
-        (sid, blok_id, hole_lat, hole_lon, "ditanam", None, kategori, usia_b)
+        "status_tanam, diameter_tajuk_m, kategori_tajuk, usia_bulan, source) VALUES (?,?,?,?,?,?,?,?,?)",
+        (sid, blok_id, hole_lat, hole_lon, "ditanam", None, kategori, usia_b, "manual")
     )
     new_id = cur.lastrowid
     db.commit()
@@ -451,3 +451,152 @@ def add_hole_from_pixel(sid):
         "id": new_id, "lat": hole_lat, "lon": hole_lon,
         "blok_id": blok_id, "kategori_tajuk": kategori, "usia_bulan": usia_b
     }), 201
+
+
+# ──────────────────────────────────────────────
+# POST /api/sessions/<sid>/reviewed-frames
+# ──────────────────────────────────────────────
+@bp.route("/<int:sid>/reviewed-frames", methods=["POST"])
+def mark_frame_reviewed(sid):
+    from datetime import datetime as dt
+    data = request.get_json() or {}
+    video    = data.get("video", "")
+    filename = data.get("filename", "")
+    if not video or not filename:
+        return jsonify({"error": "video and filename required"}), 400
+    db = get_db()
+    db.execute(
+        "INSERT OR REPLACE INTO reviewed_frames (session_id, video, filename, reviewed_at) "
+        "VALUES (?,?,?,?)",
+        (sid, video, filename, dt.utcnow().isoformat())
+    )
+    db.commit()
+    db.close()
+    return jsonify({"ok": True})
+
+
+# ──────────────────────────────────────────────
+# GET /api/sessions/<sid>/review-stats
+# ──────────────────────────────────────────────
+@bp.route("/<int:sid>/review-stats", methods=["GET"])
+def review_stats(sid):
+    db = get_db()
+    auto_count   = db.execute("SELECT COUNT(*) FROM lubang_deteksi WHERE session_id=? AND (source IS NULL OR source='auto')", (sid,)).fetchone()[0]
+    manual_count = db.execute("SELECT COUNT(*) FROM lubang_deteksi WHERE session_id=? AND source='manual'", (sid,)).fetchone()[0]
+    reviewed_count = db.execute("SELECT COUNT(*) FROM reviewed_frames WHERE session_id=?", (sid,)).fetchone()[0]
+    db.close()
+    return jsonify({
+        "auto": auto_count,
+        "manual": manual_count,
+        "total": auto_count + manual_count,
+        "reviewed_frames": reviewed_count
+    })
+
+
+# ──────────────────────────────────────────────
+# POST /api/sessions/<sid>/auto-tune
+# ──────────────────────────────────────────────
+@bp.route("/<int:sid>/auto-tune", methods=["POST"])
+def auto_tune(sid):
+    """Run grid search on reviewed frames. Returns best params."""
+    import itertools
+    from core.hole_detector import detect_holes as _detect
+
+    db = get_db()
+    sess = db.execute("SELECT tanggal_terbang, boundary_id FROM drone_sessions WHERE id=?", (sid,)).fetchone()
+    if not sess:
+        db.close()
+        return jsonify({"error": "Not found"}), 404
+
+    reviewed = db.execute(
+        "SELECT video, filename FROM reviewed_frames WHERE session_id=?", (sid,)
+    ).fetchall()
+    if not reviewed:
+        db.close()
+        return jsonify({"error": "Belum ada frame yang di-review. Buka tab Review, review beberapa frame lalu coba lagi."}), 400
+
+    gps_index_path = os.path.join(UPLOAD_DIR, f"session_{sid}", "gps_index.json")
+    if not os.path.exists(gps_index_path):
+        db.close()
+        return jsonify({"error": "GPS index tidak ditemukan. Re-proses sesi terlebih dahulu."}), 400
+
+    with open(gps_index_path) as gf:
+        gps_index = json.load(gf)
+
+    all_holes_db = db.execute(
+        "SELECT latitude, longitude FROM lubang_deteksi WHERE session_id=?", (sid,)
+    ).fetchall()
+    thresh_rows = db.execute(
+        "SELECT usia_min_bulan, usia_max_bulan, diameter_min_m FROM canopy_thresholds "
+        "WHERE jenis_tanaman='default' ORDER BY usia_min_bulan"
+    ).fetchall()
+    thresholds = [dict(t) for t in thresh_rows]
+    db.close()
+
+    gt_points = [(r["latitude"], r["longitude"]) for r in all_holes_db]
+
+    # Build per-reviewed-frame ground truth (holes within ~50m of frame GPS)
+    frame_data = []
+    for rv in reviewed:
+        key = f"session_{sid}/frames/{rv['video']}/{rv['filename']}"
+        gps = gps_index.get(key)
+        if not gps:
+            continue
+        fpath = os.path.join(UPLOAD_DIR, f"session_{sid}", "frames", rv["video"], rv["filename"])
+        if not os.path.exists(fpath):
+            continue
+        mPerDegLat = 111320
+        mPerDegLon = 111320 * math.cos(math.radians(gps["lat"]))
+        nearby = [
+            (lat, lon) for lat, lon in gt_points
+            if abs(lat - gps["lat"]) * mPerDegLat < 50 and abs(lon - gps["lon"]) * mPerDegLon < 50
+        ]
+        frame_data.append({"fpath": fpath, "gps": gps, "gt": nearby})
+
+    if not frame_data:
+        return jsonify({"error": "Frame yang di-review tidak memiliki GPS atau file gambar tidak ditemukan."}), 400
+
+    # Grid search
+    circ_values  = [0.35, 0.45, 0.55, 0.65]
+    scale_mins   = [0.3, 0.5, 0.8]
+    scale_maxs   = [2.0, 3.0, 4.5]
+
+    MATCH_RADIUS_M = 2.0
+    best_f1, best_params = -1, {}
+
+    for circ, sc_min, sc_max in itertools.product(circ_values, scale_mins, scale_maxs):
+        tp = fp = fn = 0
+        for fd in frame_data:
+            gps = fd["gps"]
+            detected = _detect(fd["fpath"], gps["lat"], gps["lon"], gps["alt"],
+                               0, thresholds,
+                               circularity_min=circ,
+                               area_scale_min=sc_min,
+                               area_scale_max=sc_max)
+            mLat = 111320
+            mLon = 111320 * math.cos(math.radians(gps["lat"]))
+            matched_gt = set()
+            for d in detected:
+                hit = False
+                for i, (gt_lat, gt_lon) in enumerate(fd["gt"]):
+                    dist = math.sqrt(((d["lat"]-gt_lat)*mLat)**2 + ((d["lon"]-gt_lon)*mLon)**2)
+                    if dist <= MATCH_RADIUS_M and i not in matched_gt:
+                        matched_gt.add(i)
+                        hit = True
+                        break
+                if hit:
+                    tp += 1
+                else:
+                    fp += 1
+            fn += len(fd["gt"]) - len(matched_gt)
+
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall    = tp / (tp + fn) if (tp + fn) > 0 else 0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+        if f1 > best_f1:
+            best_f1 = f1
+            best_params = {"circularity_min": circ, "area_scale_min": sc_min, "area_scale_max": sc_max,
+                           "precision": round(precision, 3), "recall": round(recall, 3), "f1": round(f1, 3),
+                           "frames_tested": len(frame_data)}
+
+    return jsonify(best_params)

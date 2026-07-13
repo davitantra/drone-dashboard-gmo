@@ -423,6 +423,7 @@ document.getElementById('review-session-select').addEventListener('change', asyn
   const grid = document.getElementById('frame-grid');
   const status = document.getElementById('review-status');
   grid.innerHTML = '';
+  document.getElementById('review-stats-panel').style.display = 'none';
   if (!sid) return;
   status.textContent = 'Memuat frame...';
   try {
@@ -435,6 +436,17 @@ document.getElementById('review-session-select').addEventListener('change', asyn
     const holes = holesGeoJSON.features || [];
     status.textContent = frames.length + ' frame, ' + holes.length + ' lubang terdeteksi';
     renderFrameGrid(frames, holes, sid);
+    // Fetch review stats
+    fetch('/api/sessions/' + sid + '/review-stats')
+      .then(r => r.json())
+      .then(function(stats) {
+        const panel = document.getElementById('review-stats-panel');
+        panel.style.display = '';
+        document.getElementById('review-stats-text').textContent =
+          stats.reviewed_frames + ' frame di-review · ' + stats.total + ' lubang total (' +
+          stats.auto + ' otomatis, ' + stats.manual + ' manual)';
+        document.getElementById('auto-tune-result').style.display = 'none';
+      });
   } catch(e) {
     console.warn('review load error:', e);
     status.textContent = 'Error memuat data';
@@ -467,10 +479,11 @@ function renderFrameGrid(frames, holes, sid) {
 }
 
 // ── Review tab frame modal state ──────────────────────────────────────────────
-let _modalFrames = [];
-let _modalHoles  = [];
-let _modalSid    = null;
-let _modalIdx    = 0;
+let _modalFrames  = [];
+let _modalHoles   = [];
+let _modalSid     = null;
+let _modalIdx     = 0;
+let _modalChanged = false;
 
 function openFrameModal(frames, holes, idx, sid) {
   _modalFrames = frames;
@@ -500,6 +513,15 @@ function navigateFrame(dir) {
 }
 
 function closeFrameModal() {
+  if (_modalChanged && _modalSid && _modalFrames[_modalIdx]) {
+    const f = _modalFrames[_modalIdx];
+    fetch('/api/sessions/' + _modalSid + '/reviewed-frames', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ video: f.video, filename: f.filename })
+    });
+  }
+  _modalChanged = false;
   document.getElementById('frame-modal').style.display = 'none';
   document.getElementById('modal-img').src = '';
 }
@@ -560,6 +582,7 @@ function _drawCanvasOverlay(frame) {
       fetch('/api/sessions/' + _modalSid + '/holes/' + hit.id, { method: 'DELETE' })
         .then(function(res) {
           if (res.ok) {
+            _modalChanged = true;
             _modalHoles = _modalHoles.filter(function(f) { return f.properties.id !== hit.id; });
             _drawCanvasOverlay(frame);
             document.getElementById('modal-info').textContent =
@@ -591,6 +614,7 @@ function _drawCanvasOverlay(frame) {
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.id) {
+          _modalChanged = true;
           _modalHoles.push({
             type: 'Feature',
             geometry: { type: 'Point', coordinates: [data.lon, data.lat] },
@@ -608,6 +632,37 @@ function _drawCanvasOverlay(frame) {
 document.getElementById('frame-modal').addEventListener('click', function(e) {
   if (e.target === this) closeFrameModal();
 });
+
+async function runAutoTune() {
+  const sid = document.getElementById('review-session-select').value;
+  if (!sid) return;
+  const btn = document.getElementById('btn-auto-tune');
+  const result = document.getElementById('auto-tune-result');
+  btn.textContent = '⏳ Menghitung...';
+  btn.disabled = true;
+  result.style.display = 'none';
+  try {
+    const res = await fetch('/api/sessions/' + sid + '/auto-tune', { method: 'POST' });
+    const data = await res.json();
+    btn.textContent = '🔧 Auto-tune Parameter';
+    btn.disabled = false;
+    if (data.error) { result.textContent = 'Error: ' + data.error; result.style.display = ''; return; }
+    result.innerHTML =
+      '<b>Parameter terbaik ditemukan:</b> ' +
+      'Circularity min: <b>' + data.circularity_min + '</b> · ' +
+      'Area scale min: <b>' + data.area_scale_min + '</b> · ' +
+      'Area scale max: <b>' + data.area_scale_max + '</b><br>' +
+      'F1 score: <b>' + data.f1 + '</b> · Precision: ' + data.precision + ' · Recall: ' + data.recall +
+      ' · Diuji pada ' + data.frames_tested + ' frame<br>' +
+      '<em>Untuk menerapkan, re-proses sesi menggunakan parameter ini (fitur apply akan ditambahkan kemudian).</em>';
+    result.style.display = '';
+  } catch(e) {
+    btn.textContent = '🔧 Auto-tune Parameter';
+    btn.disabled = false;
+    result.textContent = 'Gagal: ' + e.message;
+    result.style.display = '';
+  }
+}
 
 // ── Load awal ─────────────────────────────────────────────────────────────────
 loadSessions();
