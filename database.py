@@ -64,6 +64,27 @@ def init_db():
             usia_bulan       INTEGER
         );
     """)
+    # Migrate: add frame tracking columns to lubang_deteksi
+    for _col in ("source TEXT DEFAULT 'auto'", "frame_video TEXT", "frame_filename TEXT"):
+        try:
+            conn.execute(f"ALTER TABLE lubang_deteksi ADD COLUMN {_col}")
+            conn.commit()
+        except Exception:
+            pass
+
+    # Migrate: reviewed_frames table
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS reviewed_frames (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id  INTEGER NOT NULL REFERENCES drone_sessions(id) ON DELETE CASCADE,
+            video       TEXT NOT NULL,
+            filename    TEXT NOT NULL,
+            reviewed_at TEXT NOT NULL,
+            UNIQUE(session_id, video, filename)
+        )
+    """)
+    conn.commit()
+
     # Seed default thresholds jika belum ada
     cur = conn.execute("SELECT COUNT(*) FROM canopy_thresholds WHERE jenis_tanaman='default'")
     if cur.fetchone()[0] == 0:

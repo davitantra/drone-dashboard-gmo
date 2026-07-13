@@ -435,7 +435,7 @@ document.getElementById('review-session-select').addEventListener('change', asyn
     const holesGeoJSON = await holesRes.json();
     const holes = holesGeoJSON.features || [];
     status.textContent = frames.length + ' frame, ' + holes.length + ' lubang terdeteksi';
-    renderFrameGrid(frames, holes, sid);
+    renderFrameGrid(frames, sid);
     // Fetch review stats
     fetch('/api/sessions/' + sid + '/review-stats')
       .then(r => r.json())
@@ -453,7 +453,7 @@ document.getElementById('review-session-select').addEventListener('change', asyn
   }
 });
 
-function renderFrameGrid(frames, holes, sid) {
+function renderFrameGrid(frames, sid) {
   const grid = document.getElementById('frame-grid');
   grid.innerHTML = '';
   if (!frames.length) {
@@ -470,9 +470,10 @@ function renderFrameGrid(frames, holes, sid) {
       '<div style="padding:6px 8px;font-size:11px;color:#555">' +
         '<b>Frame ' + (idx + 1) + '</b><br>' +
         frame.video.substring(0, 20) + (frame.video.length > 20 ? '…' : '') +
+        (frame.lat ? ' · 📍' : ' · no GPS') +
       '</div>';
     card.addEventListener('click', function() {
-      openFrameModal(frames, holes, idx, sid);
+      openFrameModal(frames, [], idx, sid);
     });
     grid.appendChild(card);
   });
@@ -487,9 +488,10 @@ let _modalChanged = false;
 
 function openFrameModal(frames, holes, idx, sid) {
   _modalFrames = frames;
-  _modalHoles  = holes;
+  _modalHoles  = [];   // loaded per-frame
   _modalSid    = sid;
   _modalIdx    = idx;
+  _modalChanged = false;
   document.getElementById('frame-modal').style.display = '';
   _renderModalFrame();
 }
@@ -500,11 +502,29 @@ function _renderModalFrame() {
   const counter = document.getElementById('modal-frame-counter');
   counter.textContent = 'Frame ' + (_modalIdx + 1) + ' / ' + _modalFrames.length +
     (frame.lat ? ' · GPS: ' + frame.lat.toFixed(5) + ', ' + frame.lon.toFixed(5) : ' · GPS tidak tersedia');
-  document.getElementById('modal-info').textContent =
-    _modalHoles.length + ' lubang terdeteksi total dalam sesi ini';
+  document.getElementById('modal-info').textContent = 'Memuat lubang...';
   img.src = frame.url;
-  img.onload = function() { _drawCanvasOverlay(frame); };
-  if (img.complete && img.naturalWidth) { _drawCanvasOverlay(frame); }
+
+  // Load holes for this specific frame
+  _modalHoles = [];
+  const url = '/api/sessions/' + _modalSid + '/frame-holes?video=' +
+    encodeURIComponent(frame.video) + '&filename=' + encodeURIComponent(frame.filename);
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(gj) {
+      _modalHoles = gj.features || [];
+      document.getElementById('modal-info').textContent =
+        _modalHoles.length + ' lubang di frame ini';
+      var imgEl = document.getElementById('modal-img');
+      if (imgEl.complete && imgEl.naturalWidth) {
+        _drawCanvasOverlay(frame);
+      } else {
+        imgEl.onload = function() { _drawCanvasOverlay(frame); };
+      }
+    })
+    .catch(function() {
+      document.getElementById('modal-info').textContent = 'GPS tidak tersedia / belum diproses';
+    });
 }
 
 function navigateFrame(dir) {
@@ -608,7 +628,8 @@ function _drawCanvasOverlay(frame) {
         body: JSON.stringify({
           lat: frame.lat, lon: frame.lon, alt: frame.alt,
           pixel_x: srcX, pixel_y: srcY,
-          img_w: img2.naturalWidth || 1920, img_h: img2.naturalHeight || 1080
+          img_w: img2.naturalWidth || 1920, img_h: img2.naturalHeight || 1080,
+          frame_video: frame.video, frame_filename: frame.filename
         })
       })
       .then(function(r) { return r.json(); })
@@ -634,18 +655,19 @@ document.getElementById('frame-modal').addEventListener('click', function(e) {
 });
 
 async function deleteAllHoles() {
-  const sid = document.getElementById('review-session-select').value;
-  if (!sid) return;
-  if (!confirm('Hapus SEMUA lubang untuk sesi ini? Tindakan ini tidak dapat dibatalkan.')) return;
+  if (!_modalSid || !_modalFrames[_modalIdx]) return;
+  const frame = _modalFrames[_modalIdx];
+  if (!confirm('Hapus semua lubang pada frame ini? Tindakan ini tidak dapat dibatalkan.')) return;
   try {
-    const res = await fetch('/api/sessions/' + sid + '/holes', { method: 'DELETE' });
+    const url = '/api/sessions/' + _modalSid + '/frame-holes?video=' +
+      encodeURIComponent(frame.video) + '&filename=' + encodeURIComponent(frame.filename);
+    const res = await fetch(url, { method: 'DELETE' });
     const data = await res.json();
     if (!res.ok) { alert('Gagal: ' + (data.error || res.status)); return; }
     _modalHoles = [];
-    alert(data.deleted + ' lubang dihapus.');
-    // Refresh review status and map
-    document.getElementById('review-session-select').dispatchEvent(new Event('change'));
-    if (currentSessionId == sid) loadHoles(sid);
+    _drawCanvasOverlay(frame);
+    document.getElementById('modal-info').textContent = '0 lubang di frame ini';
+    if (currentSessionId == _modalSid) loadHoles(_modalSid);
   } catch(e) { alert('Gagal: ' + e.message); }
 }
 

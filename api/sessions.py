@@ -264,6 +264,18 @@ def _run_pipeline(sid: int):
         _set_progress(sid, 92, "Deduplikasi lubang...")
         deduped = deduplicate(all_holes, cell_m=2.0)
 
+        # Assign each deduped hole to its nearest frame in gps_index
+        def _nearest_frame(hole_lat, hole_lon):
+            best_key, best_d = None, float("inf")
+            for key, g in gps_index.items():
+                d = (hole_lat - g["lat"]) ** 2 + (hole_lon - g["lon"]) ** 2
+                if d < best_d:
+                    best_d, best_key = d, key
+            if best_key is None:
+                return None, None
+            parts = best_key.split("/")  # session_N/frames/vname/fname
+            return parts[-2], parts[-1]
+
         _set_progress(sid, 95, "Simpan ke database...")
         db2 = get_db()
         try:
@@ -285,11 +297,13 @@ def _run_pipeline(sid: int):
                             tanggal,
                         )
 
+                fvideo, ffname = _nearest_frame(h["lat"], h["lon"])
+
                 db2.execute(
                     "INSERT INTO lubang_deteksi "
                     "(session_id, blok_id, latitude, longitude, status_tanam, "
-                    " diameter_tajuk_m, kategori_tajuk, usia_bulan) "
-                    "VALUES (?,?,?,?,?,?,?,?)",
+                    " diameter_tajuk_m, kategori_tajuk, usia_bulan, frame_video, frame_filename) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?)",
                     (
                         sid, blok_id,
                         h["lat"], h["lon"],
@@ -297,6 +311,7 @@ def _run_pipeline(sid: int):
                         h["diameter_tajuk_m"],
                         h["kategori_tajuk"],
                         usia_b,
+                        fvideo, ffname,
                     ),
                 )
 
@@ -356,18 +371,51 @@ def list_frames(sid):
 
 
 # ──────────────────────────────────────────────
-# DELETE /api/sessions/<sid>/holes  (hapus semua)
+# GET  /api/sessions/<sid>/frame-holes?video=X&filename=Y
+# DELETE /api/sessions/<sid>/frame-holes?video=X&filename=Y
 # ──────────────────────────────────────────────
-@bp.route("/<int:sid>/holes", methods=["DELETE"])
-def delete_all_holes(sid):
+@bp.route("/<int:sid>/frame-holes", methods=["GET", "DELETE"])
+def frame_holes(sid):
+    video    = request.args.get("video", "")
+    filename = request.args.get("filename", "")
+    if not video or not filename:
+        return jsonify({"error": "video and filename required"}), 400
+
     db = get_db()
-    if not db.execute("SELECT id FROM drone_sessions WHERE id=?", (sid,)).fetchone():
+    if request.method == "DELETE":
+        result = db.execute(
+            "DELETE FROM lubang_deteksi WHERE session_id=? AND frame_video=? AND frame_filename=?",
+            (sid, video, filename)
+        )
+        db.commit()
         db.close()
-        return jsonify({"error": "Not found"}), 404
-    result = db.execute("DELETE FROM lubang_deteksi WHERE session_id=?", (sid,))
-    db.commit()
+        return jsonify({"ok": True, "deleted": result.rowcount})
+
+    # GET — return holes for this frame as GeoJSON
+    rows = db.execute(
+        "SELECT id, latitude, longitude, status_tanam, diameter_tajuk_m, "
+        "       kategori_tajuk, usia_bulan, blok_id, source "
+        "FROM lubang_deteksi "
+        "WHERE session_id=? AND frame_video=? AND frame_filename=?",
+        (sid, video, filename)
+    ).fetchall()
     db.close()
-    return jsonify({"ok": True, "deleted": result.rowcount})
+    features = []
+    for r in rows:
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [r["longitude"], r["latitude"]]},
+            "properties": {
+                "id": r["id"],
+                "status_tanam": r["status_tanam"],
+                "diameter_tajuk_m": r["diameter_tajuk_m"],
+                "kategori_tajuk": r["kategori_tajuk"],
+                "usia_bulan": r["usia_bulan"],
+                "blok_id": r["blok_id"],
+                "source": r["source"],
+            }
+        })
+    return jsonify({"type": "FeatureCollection", "features": features})
 
 
 # ──────────────────────────────────────────────
@@ -394,13 +442,15 @@ def add_hole_from_pixel(sid):
     from core.gps_projection import pixel_to_gps, wgs84_to_utm50n as _wgs84_to_utm50n
     from core.canopy_classifier import classify_canopy, get_usia_bulan as _get_usia_bulan
     data = request.get_json() or {}
-    pixel_x   = data.get("pixel_x", 0)
-    pixel_y   = data.get("pixel_y", 0)
-    img_w     = data.get("img_w", 1920)
-    img_h     = data.get("img_h", 1080)
-    drone_lat = data.get("lat")
-    drone_lon = data.get("lon")
-    alt       = data.get("alt", 30.0)
+    pixel_x    = data.get("pixel_x", 0)
+    pixel_y    = data.get("pixel_y", 0)
+    img_w      = data.get("img_w", 1920)
+    img_h      = data.get("img_h", 1080)
+    drone_lat  = data.get("lat")
+    drone_lon  = data.get("lon")
+    alt        = data.get("alt", 30.0)
+    frame_video    = data.get("frame_video")
+    frame_filename = data.get("frame_filename")
 
     if drone_lat is None or drone_lon is None:
         return jsonify({"error": "GPS tidak tersedia untuk frame ini"}), 400
@@ -456,8 +506,10 @@ def add_hole_from_pixel(sid):
 
     cur = db.execute(
         "INSERT INTO lubang_deteksi (session_id, blok_id, latitude, longitude, "
-        "status_tanam, diameter_tajuk_m, kategori_tajuk, usia_bulan, source) VALUES (?,?,?,?,?,?,?,?,?)",
-        (sid, blok_id, hole_lat, hole_lon, "ditanam", None, kategori, usia_b, "manual")
+        "status_tanam, diameter_tajuk_m, kategori_tajuk, usia_bulan, source, frame_video, frame_filename) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (sid, blok_id, hole_lat, hole_lon, "ditanam", None, kategori, usia_b, "manual",
+         frame_video, frame_filename)
     )
     new_id = cur.lastrowid
     db.commit()
