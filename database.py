@@ -118,4 +118,18 @@ def init_db():
         )
     """)
     conn.commit()
+
+    # Migrate: rejected_holes table
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS rejected_holes (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id     INTEGER NOT NULL REFERENCES drone_sessions(id) ON DELETE CASCADE,
+            frame_video    TEXT,
+            frame_filename TEXT,
+            latitude       REAL NOT NULL,
+            longitude      REAL NOT NULL,
+            rejected_at    TEXT NOT NULL
+        )
+    """)
+    conn.commit()
     conn.close()

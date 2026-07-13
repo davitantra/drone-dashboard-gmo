@@ -444,11 +444,21 @@ def update_hole(sid, hole_id):
 @bp.route("/<int:sid>/holes/<int:hole_id>", methods=["DELETE"])
 def delete_hole(sid, hole_id):
     db = get_db()
-    row = db.execute("SELECT id FROM lubang_deteksi WHERE id=? AND session_id=?", (hole_id, sid)).fetchone()
+    row = db.execute(
+        "SELECT id, latitude, longitude, frame_video, frame_filename "
+        "FROM lubang_deteksi WHERE id=? AND session_id=?",
+        (hole_id, sid)
+    ).fetchone()
     if not row:
         db.close()
         return jsonify({"error": "Not found"}), 404
     db.execute("DELETE FROM lubang_deteksi WHERE id=?", (hole_id,))
+    db.execute(
+        "INSERT INTO rejected_holes (session_id, frame_video, frame_filename, latitude, longitude, rejected_at) "
+        "VALUES (?,?,?,?,?,?)",
+        (sid, row["frame_video"], row["frame_filename"], row["latitude"], row["longitude"],
+         datetime.utcnow().isoformat())
+    )
     db.commit()
     db.close()
     return jsonify({"ok": True})
@@ -618,6 +628,10 @@ def auto_tune(sid):
         "WHERE jenis_tanaman='default' ORDER BY usia_min_bulan"
     ).fetchall()
     thresholds = [dict(t) for t in thresh_rows]
+    rejected_rows = db.execute(
+        "SELECT latitude, longitude FROM rejected_holes WHERE session_id=?", (sid,)
+    ).fetchall()
+    rejected_points = [(r["latitude"], r["longitude"]) for r in rejected_rows]
     db.close()
 
     gt_points = [(r["latitude"], r["longitude"]) for r in all_holes_db]
@@ -677,6 +691,14 @@ def auto_tune(sid):
                     fp += 1
             fn += len(fd["gt"]) - len(matched_gt)
 
+            # Extra FP penalty for detecting at previously-rejected positions
+            for d in detected:
+                for rj_lat, rj_lon in rejected_points:
+                    dist = math.sqrt(((d["lat"]-rj_lat)*mLat)**2 + ((d["lon"]-rj_lon)*mLon)**2)
+                    if dist <= MATCH_RADIUS_M:
+                        fp += 1  # count again as explicit false positive
+                        break
+
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0
         recall    = tp / (tp + fn) if (tp + fn) > 0 else 0
         f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
@@ -687,3 +709,127 @@ def auto_tune(sid):
                            "frames_tested": len(frame_data)}
 
     return jsonify(best_params)
+
+
+# ──────────────────────────────────────────────
+# POST /api/sessions/<sid>/auto-tune-hsv
+# ──────────────────────────────────────────────
+@bp.route("/<int:sid>/auto-tune-hsv", methods=["POST"])
+def auto_tune_hsv(sid):
+    """
+    Tune green-pixel threshold for status_tanam classification.
+    Uses manually-labeled holes (source='manual') with frame images.
+    """
+    db = get_db()
+    labeled = db.execute(
+        "SELECT latitude, longitude, status_tanam, frame_video, frame_filename "
+        "FROM lubang_deteksi "
+        "WHERE session_id=? AND source='manual' AND frame_video IS NOT NULL AND frame_filename IS NOT NULL",
+        (sid,)
+    ).fetchall()
+    db.close()
+
+    if len(labeled) < 4:
+        return jsonify({"error": "Minimal 4 lubang berlabel diperlukan. Label lebih banyak lubang (Ditanam/Kosong) di tab Review terlebih dahulu."}), 400
+
+    import cv2, numpy as np
+    from config import UPLOAD_DIR, IMG_W, IMG_H, HFOV_DEG, VFOV_DEG
+    from core.gps_projection import footprint_meters
+    import math as _math
+
+    HSV_LOW  = np.array([22,  12,  20])
+    HSV_HIGH = np.array([95, 255, 255])
+
+    # Load GPS index for altitude info
+    gps_index_path = os.path.join(UPLOAD_DIR, f"session_{sid}", "gps_index.json")
+    gps_index = {}
+    if os.path.exists(gps_index_path):
+        with open(gps_index_path) as gf:
+            gps_index = json.load(gf)
+
+    samples = []  # list of (green_pct, status_tanam)
+    for row in labeled:
+        fpath = os.path.join(UPLOAD_DIR, f"session_{sid}", "frames",
+                             row["frame_video"], row["frame_filename"])
+        if not os.path.exists(fpath):
+            continue
+        img = cv2.imread(fpath)
+        if img is None:
+            continue
+
+        # Get frame GPS for px_per_meter
+        key = f"session_{sid}/frames/{row['frame_video']}/{row['frame_filename']}"
+        gps = gps_index.get(key, {})
+        alt = gps.get("alt", 30.0)
+        fp_w, _ = footprint_meters(alt)
+        px_per_meter = IMG_W / fp_w
+
+        # Find pixel position of hole from GPS
+        frame_lat = gps.get("lat")
+        frame_lon = gps.get("lon")
+        if frame_lat is None or frame_lon is None:
+            continue
+
+        mPerDegLat = 111320
+        mPerDegLon = 111320 * _math.cos(_math.radians(frame_lat))
+        HFOV = _math.radians(HFOV_DEG)
+        VFOV = _math.radians(VFOV_DEG)
+        fw = 2 * alt * _math.tan(HFOV / 2)
+        fh = 2 * alt * _math.tan(VFOV / 2)
+
+        dLat = (row["latitude"]  - frame_lat) * mPerDegLat
+        dLon = (row["longitude"] - frame_lon) * mPerDegLon
+        cx = int(IMG_W / 2 + (dLon / fw) * IMG_W)
+        cy = int(IMG_H / 2 - (dLat / fh) * IMG_H)
+
+        if cx < 0 or cx >= img.shape[1] or cy < 0 or cy >= img.shape[0]:
+            continue
+
+        # Measure green % in 44x44 region around hole
+        x1, x2 = max(0, cx-22), min(img.shape[1], cx+22)
+        y1, y2 = max(0, cy-22), min(img.shape[0], cy+22)
+        roi = img[y1:y2, x1:x2]
+        if roi.size == 0:
+            continue
+        hsv  = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv, HSV_LOW, HSV_HIGH)
+        n_green = int(cv2.countNonZero(mask))
+        total   = roi.shape[0] * roi.shape[1]
+        green_pct = n_green / max(total, 1)
+        samples.append((green_pct, row["status_tanam"]))
+
+    if len(samples) < 4:
+        return jsonify({"error": "Tidak cukup frame gambar ditemukan untuk analisis. Pastikan sesi sudah diproses dan frame tersimpan."}), 400
+
+    ditanam_pcts = [s[0] for s in samples if s[1] == "ditanam"]
+    kosong_pcts  = [s[0] for s in samples if s[1] == "kosong"]
+
+    if not ditanam_pcts or not kosong_pcts:
+        return jsonify({"error": "Butuh setidaknya 1 sampel 'ditanam' DAN 1 sampel 'kosong'. Tambahkan label kedua jenis."}), 400
+
+    mean_ditanam = sum(ditanam_pcts) / len(ditanam_pcts)
+    mean_kosong  = sum(kosong_pcts)  / len(kosong_pcts)
+
+    # Best threshold: midpoint between means, search +-20% around it for max accuracy
+    mid = (mean_ditanam + mean_kosong) / 2
+    best_thresh, best_acc = mid, 0
+    for t_raw in range(1, 30):
+        t = t_raw / 200.0  # 0.005 to 0.145
+        correct = sum(
+            1 for pct, label in samples
+            if (pct >= t) == (label == "ditanam")
+        )
+        acc = correct / len(samples)
+        if acc > best_acc:
+            best_acc, best_thresh = acc, t
+
+    return jsonify({
+        "best_green_pct_threshold": round(best_thresh, 4),
+        "accuracy": round(best_acc, 3),
+        "samples": len(samples),
+        "mean_ditanam_pct": round(mean_ditanam, 4),
+        "mean_kosong_pct": round(mean_kosong, 4),
+        "ditanam_count": len(ditanam_pcts),
+        "kosong_count": len(kosong_pcts),
+        "current_threshold": 0.01
+    })

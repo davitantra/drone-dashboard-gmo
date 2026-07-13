@@ -754,6 +754,38 @@ async function runAutoTune() {
   }
 }
 
+async function runAutoTuneHSV() {
+  const sid = document.getElementById('review-session-select').value;
+  if (!sid) return;
+  const btn = document.getElementById('btn-auto-tune-hsv');
+  const result = document.getElementById('auto-tune-result');
+  btn.textContent = '⏳ Menganalisis...';
+  btn.disabled = true;
+  result.style.display = 'none';
+  try {
+    const res = await fetch('/api/sessions/' + sid + '/auto-tune-hsv', { method: 'POST' });
+    const data = await res.json();
+    btn.textContent = '🎨 Auto-tune HSV';
+    btn.disabled = false;
+    if (data.error) { result.textContent = 'Error: ' + data.error; result.style.display = ''; return; }
+    result.innerHTML =
+      '<b>Hasil analisis hijau:</b> ' +
+      'Threshold optimal: <b>' + data.best_green_pct_threshold + '</b> ' +
+      '(saat ini: ' + data.current_threshold + ') · ' +
+      'Akurasi: <b>' + (data.accuracy * 100).toFixed(1) + '%</b> · ' +
+      data.samples + ' sampel (' + data.ditanam_count + ' ditanam, ' + data.kosong_count + ' kosong)<br>' +
+      'Rata-rata hijau: ditanam=' + (data.mean_ditanam_pct * 100).toFixed(1) + '% · ' +
+      'kosong=' + (data.mean_kosong_pct * 100).toFixed(1) + '%<br>' +
+      '<em>Update nilai <code>green_pct >= ' + data.best_green_pct_threshold + '</code> di hole_detector.py untuk menerapkan.</em>';
+    result.style.display = '';
+  } catch(e) {
+    btn.textContent = '🎨 Auto-tune HSV';
+    btn.disabled = false;
+    result.textContent = 'Gagal: ' + e.message;
+    result.style.display = '';
+  }
+}
+
 // ── Load awal ─────────────────────────────────────────────────────────────────
 loadSessions();
 loadBoundaries();

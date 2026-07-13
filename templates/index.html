@@ -162,6 +162,7 @@
         <span id="review-stats-text" style="font-size:12px;color:#555"></span>
         <button class="btn btn-sm btn-outline" onclick="runAutoTune()" id="btn-auto-tune">🔧 Auto-tune Parameter</button>
         <button class="btn btn-sm btn-danger" onclick="deleteAllHoles()">🗑 Hapus Semua Lubang</button>
+        <button class="btn btn-sm btn-outline" onclick="runAutoTuneHSV()" id="btn-auto-tune-hsv">🎨 Auto-tune HSV</button>
       </div>
       <div id="auto-tune-result" style="margin-top:8px;font-size:12px;color:#555;display:none"></div>
     </div>
@@ -174,6 +175,7 @@
           <button onclick="navigateFrame(1)" class="btn btn-sm btn-outline">Next ▶</button>
           <span id="modal-frame-counter" style="color:#fff;font-size:12px;margin-left:8px"></span>
           <span style="color:#aaa;font-size:11px;margin-left:8px">Klik lubang untuk hapus · Klik area kosong untuk tambah lubang</span>
+          <button onclick="deleteAllHoles()" class="btn btn-sm btn-danger" style="margin-left:auto">🗑 Hapus Semua Frame Ini</button>
         </div>
         <div style="position:relative;display:inline-block;width:100%">
           <img id="modal-img" src="" style="width:100%;display:block;border-radius:4px;user-select:none">
