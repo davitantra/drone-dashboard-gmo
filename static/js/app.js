@@ -633,6 +633,22 @@ document.getElementById('frame-modal').addEventListener('click', function(e) {
   if (e.target === this) closeFrameModal();
 });
 
+async function deleteAllHoles() {
+  const sid = document.getElementById('review-session-select').value;
+  if (!sid) return;
+  if (!confirm('Hapus SEMUA lubang untuk sesi ini? Tindakan ini tidak dapat dibatalkan.')) return;
+  try {
+    const res = await fetch('/api/sessions/' + sid + '/holes', { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) { alert('Gagal: ' + (data.error || res.status)); return; }
+    _modalHoles = [];
+    alert(data.deleted + ' lubang dihapus.');
+    // Refresh review status and map
+    document.getElementById('review-session-select').dispatchEvent(new Event('change'));
+    if (currentSessionId == sid) loadHoles(sid);
+  } catch(e) { alert('Gagal: ' + e.message); }
+}
+
 async function runAutoTune() {
   const sid = document.getElementById('review-session-select').value;
   if (!sid) return;

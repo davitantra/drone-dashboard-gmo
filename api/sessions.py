@@ -356,6 +356,21 @@ def list_frames(sid):
 
 
 # ──────────────────────────────────────────────
+# DELETE /api/sessions/<sid>/holes  (hapus semua)
+# ──────────────────────────────────────────────
+@bp.route("/<int:sid>/holes", methods=["DELETE"])
+def delete_all_holes(sid):
+    db = get_db()
+    if not db.execute("SELECT id FROM drone_sessions WHERE id=?", (sid,)).fetchone():
+        db.close()
+        return jsonify({"error": "Not found"}), 404
+    result = db.execute("DELETE FROM lubang_deteksi WHERE session_id=?", (sid,))
+    db.commit()
+    db.close()
+    return jsonify({"ok": True, "deleted": result.rowcount})
+
+
+# ──────────────────────────────────────────────
 # DELETE /api/sessions/<sid>/holes/<hole_id>
 # ──────────────────────────────────────────────
 @bp.route("/<int:sid>/holes/<int:hole_id>", methods=["DELETE"])
