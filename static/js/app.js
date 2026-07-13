@@ -575,13 +575,17 @@ function _drawCanvasOverlay(frame) {
       const newLat = frame.lat + dLatM / mPerDegLat2;
       const newLon = frame.lon + dLonM / mPerDegLon2;
 
+      // Scale canvas display coords → source image coords (1920×1080) for pixel_to_gps
+      const img2 = document.getElementById('modal-img');
+      const srcX = cx / canvas.width  * (img2.naturalWidth  || 1920);
+      const srcY = cy / canvas.height * (img2.naturalHeight || 1080);
       fetch('/api/sessions/' + _modalSid + '/holes/from_pixel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           lat: frame.lat, lon: frame.lon, alt: frame.alt,
-          pixel_x: cx, pixel_y: cy,
-          img_w: canvas.width, img_h: canvas.height
+          pixel_x: srcX, pixel_y: srcY,
+          img_w: img2.naturalWidth || 1920, img_h: img2.naturalHeight || 1080
         })
       })
       .then(function(r) { return r.json(); })
