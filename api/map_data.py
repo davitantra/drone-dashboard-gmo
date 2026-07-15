@@ -27,7 +27,8 @@ def holes_all():
         "ld.status_tanam, ld.diameter_tajuk_m, ld.kategori_tajuk, ld.usia_bulan, "
         "ds.nama AS session_nama, ds.tanggal_terbang "
         "FROM lubang_deteksi ld "
-        "JOIN drone_sessions ds ON ld.session_id = ds.id"
+        "JOIN drone_sessions ds ON ld.session_id = ds.id "
+        "WHERE (ds.boundary_id IS NULL OR ld.blok_id IS NOT NULL)"
     ).fetchall()
     db.close()
     features = []
@@ -53,12 +54,18 @@ def holes_all():
 @bp.route("/<int:sid>", methods=["GET"])
 def holes_geojson(sid):
     db = get_db()
-    rows = db.execute(
+    sess = db.execute(
+        "SELECT boundary_id FROM drone_sessions WHERE id=?", (sid,)
+    ).fetchone()
+    has_boundary = sess and sess["boundary_id"] is not None
+
+    query = (
         "SELECT id, latitude, longitude, status_tanam, diameter_tajuk_m, "
         "       kategori_tajuk, usia_bulan, blok_id "
-        "FROM lubang_deteksi WHERE session_id=?",
-        (sid,)
-    ).fetchall()
+        "FROM lubang_deteksi WHERE session_id=?"
+        + (" AND blok_id IS NOT NULL" if has_boundary else "")
+    )
+    rows = db.execute(query, (sid,)).fetchall()
     db.close()
 
     features = []

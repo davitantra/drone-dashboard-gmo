@@ -297,6 +297,10 @@ def _run_pipeline(sid: int):
                             tanggal,
                         )
 
+                # Skip holes outside all bloks when boundary is assigned
+                if boundary_id and blok_id is None:
+                    continue
+
                 fvideo, ffname = _nearest_frame(h["lat"], h["lon"])
 
                 db2.execute(
