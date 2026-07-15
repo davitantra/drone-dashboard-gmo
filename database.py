@@ -119,6 +119,13 @@ def init_db():
     """)
     conn.commit()
 
+    # Migrate: submitted_for_training column on reviewed_frames
+    try:
+        conn.execute("ALTER TABLE reviewed_frames ADD COLUMN submitted_for_training INTEGER DEFAULT 0")
+        conn.commit()
+    except Exception:
+        pass
+
     # Migrate: rejected_holes table
     conn.execute("""
         CREATE TABLE IF NOT EXISTS rejected_holes (

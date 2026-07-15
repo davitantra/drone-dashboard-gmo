@@ -582,16 +582,44 @@ def mark_frame_reviewed(sid):
 @bp.route("/<int:sid>/review-stats", methods=["GET"])
 def review_stats(sid):
     db = get_db()
-    auto_count   = db.execute("SELECT COUNT(*) FROM lubang_deteksi WHERE session_id=? AND (source IS NULL OR source='auto')", (sid,)).fetchone()[0]
-    manual_count = db.execute("SELECT COUNT(*) FROM lubang_deteksi WHERE session_id=? AND source='manual'", (sid,)).fetchone()[0]
+    auto_count     = db.execute("SELECT COUNT(*) FROM lubang_deteksi WHERE session_id=? AND (source IS NULL OR source='auto')", (sid,)).fetchone()[0]
+    manual_count   = db.execute("SELECT COUNT(*) FROM lubang_deteksi WHERE session_id=? AND source='manual'", (sid,)).fetchone()[0]
     reviewed_count = db.execute("SELECT COUNT(*) FROM reviewed_frames WHERE session_id=?", (sid,)).fetchone()[0]
+    training_count = db.execute("SELECT COUNT(*) FROM reviewed_frames WHERE session_id=? AND submitted_for_training=1", (sid,)).fetchone()[0]
+    reviewed_rows  = db.execute("SELECT video, filename FROM reviewed_frames WHERE session_id=?", (sid,)).fetchall()
+    training_rows  = db.execute("SELECT video, filename FROM reviewed_frames WHERE session_id=? AND submitted_for_training=1", (sid,)).fetchall()
     db.close()
     return jsonify({
         "auto": auto_count,
         "manual": manual_count,
         "total": auto_count + manual_count,
-        "reviewed_frames": reviewed_count
+        "reviewed_frames": reviewed_count,
+        "reviewed_filenames": [r["video"] + "/" + r["filename"] for r in reviewed_rows],
+        "training_frames": training_count,
+        "training_filenames": [r["video"] + "/" + r["filename"] for r in training_rows],
     })
+
+
+# ──────────────────────────────────────────────
+# POST /api/sessions/<sid>/frame-training
+# ──────────────────────────────────────────────
+@bp.route("/<int:sid>/frame-training", methods=["POST"])
+def submit_frame_training(sid):
+    data     = request.get_json() or {}
+    video    = data.get("video")
+    filename = data.get("filename")
+    if not video or not filename:
+        return jsonify({"error": "video and filename required"}), 400
+    db = get_db()
+    db.execute("""
+        INSERT INTO reviewed_frames (session_id, video, filename, reviewed_at, submitted_for_training)
+        VALUES (?, ?, ?, ?, 1)
+        ON CONFLICT(session_id, video, filename)
+        DO UPDATE SET submitted_for_training=1
+    """, (sid, video, filename, datetime.utcnow().isoformat()))
+    db.commit()
+    db.close()
+    return jsonify({"ok": True})
 
 
 # ──────────────────────────────────────────────
@@ -609,9 +637,17 @@ def auto_tune(sid):
         db.close()
         return jsonify({"error": "Not found"}), 404
 
-    reviewed = db.execute(
-        "SELECT video, filename FROM reviewed_frames WHERE session_id=?", (sid,)
+    training = db.execute(
+        "SELECT video, filename FROM reviewed_frames WHERE session_id=? AND submitted_for_training=1", (sid,)
     ).fetchall()
+    _training_fallback = False
+    if training:
+        reviewed = training
+    else:
+        reviewed = db.execute(
+            "SELECT video, filename FROM reviewed_frames WHERE session_id=?", (sid,)
+        ).fetchall()
+        _training_fallback = True
     if not reviewed:
         db.close()
         return jsonify({"error": "Belum ada frame yang di-review. Buka tab Review, review beberapa frame lalu coba lagi."}), 400
@@ -712,6 +748,8 @@ def auto_tune(sid):
                            "precision": round(precision, 3), "recall": round(recall, 3), "f1": round(f1, 3),
                            "frames_tested": len(frame_data)}
 
+    if _training_fallback:
+        best_params["warning"] = "Tidak ada training frames; menggunakan semua reviewed frames sebagai fallback."
     return jsonify(best_params)
 
 
@@ -725,12 +763,31 @@ def auto_tune_hsv(sid):
     Uses manually-labeled holes (source='manual') with frame images.
     """
     db = get_db()
-    labeled = db.execute(
-        "SELECT latitude, longitude, status_tanam, frame_video, frame_filename "
-        "FROM lubang_deteksi "
-        "WHERE session_id=? AND source='manual' AND frame_video IS NOT NULL AND frame_filename IS NOT NULL",
-        (sid,)
+    # Prefer holes from training-submitted frames; fallback to all manual holes
+    training_rows = db.execute(
+        "SELECT video, filename FROM reviewed_frames WHERE session_id=? AND submitted_for_training=1", (sid,)
     ).fetchall()
+    _hsv_fallback = False
+    if training_rows:
+        placeholders = ",".join("?" for _ in training_rows)
+        pairs = [(r["video"], r["filename"]) for r in training_rows]
+        labeled = []
+        for vid, fn in pairs:
+            rows = db.execute(
+                "SELECT latitude, longitude, status_tanam, frame_video, frame_filename "
+                "FROM lubang_deteksi "
+                "WHERE session_id=? AND source='manual' AND frame_video=? AND frame_filename=?",
+                (sid, vid, fn)
+            ).fetchall()
+            labeled.extend(rows)
+    else:
+        labeled = db.execute(
+            "SELECT latitude, longitude, status_tanam, frame_video, frame_filename "
+            "FROM lubang_deteksi "
+            "WHERE session_id=? AND source='manual' AND frame_video IS NOT NULL AND frame_filename IS NOT NULL",
+            (sid,)
+        ).fetchall()
+        _hsv_fallback = True
     db.close()
 
     if len(labeled) < 4:
@@ -827,7 +884,7 @@ def auto_tune_hsv(sid):
         if acc > best_acc:
             best_acc, best_thresh = acc, t
 
-    return jsonify({
+    resp = {
         "best_green_pct_threshold": round(best_thresh, 4),
         "accuracy": round(best_acc, 3),
         "samples": len(samples),
@@ -836,4 +893,7 @@ def auto_tune_hsv(sid):
         "ditanam_count": len(ditanam_pcts),
         "kosong_count": len(kosong_pcts),
         "current_threshold": 0.01
-    })
+    }
+    if _hsv_fallback:
+        resp["warning"] = "Tidak ada training frames; menggunakan semua frame manual sebagai fallback."
+    return jsonify(resp)

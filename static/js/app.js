@@ -10,7 +10,7 @@ document.querySelectorAll('.nav-tab').forEach(function(tab) {
     tab.classList.add('active');
     document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
     if (tab.dataset.tab === 'peta') { setTimeout(function() { map.invalidateSize(); }, 100); }
-    if (tab.dataset.tab === 'review') { loadReviewSessions(); }
+    if (tab.dataset.tab === 'review') { loadReviewSessions(); _initReviewMap(); setTimeout(function() { if (_reviewMap) _reviewMap.invalidateSize(); }, 100); }
   });
 });
 
@@ -402,6 +402,63 @@ document.getElementById('btn-save-settings').addEventListener('click', function(
   alert('Pengaturan disimpan (belum ada API settings).');
 });
 
+// ── Review Mini-map ───────────────────────────────────────────────────────────
+var _reviewMap = null;
+var _reviewMarkerLayer = null;
+var _reviewedFilenames = [];
+var _trainingFilenames = [];
+var _currentReviewBoundaryId = null;
+
+function _initReviewMap() {
+  if (_reviewMap) return;
+  _reviewMap = L.map('review-map', { zoomControl: true, attributionControl: false });
+  _reviewMarkerLayer = L.layerGroup().addTo(_reviewMap);
+  _reviewMap.setView([0, 0], 2);
+}
+
+async function _renderReviewMap(frames, sid, boundaryId) {
+  if (!_reviewMap) return;
+  _reviewMarkerLayer.clearLayers();
+  // Remove old GeoJSON boundary layers
+  _reviewMap.eachLayer(function(l) {
+    if (l !== _reviewMarkerLayer) _reviewMap.removeLayer(l);
+  });
+
+  // Draw boundary polygon
+  if (boundaryId) {
+    try {
+      var gjRes = await fetch('/api/map/bloks/' + boundaryId);
+      if (gjRes.ok) {
+        var gj = await gjRes.json();
+        L.geoJSON(gj, {
+          style: { color: '#27ae60', weight: 2, fillColor: '#27ae60', fillOpacity: 0.15 }
+        }).addTo(_reviewMap);
+      }
+    } catch(e) {}
+  }
+
+  var bounds = [];
+  frames.forEach(function(frame, idx) {
+    if (!frame.lat || !frame.lon) return;
+    var key = frame.video + '/' + frame.filename;
+    var color = '#95a5a6';
+    if (_trainingFilenames.indexOf(key) >= 0) color = '#e67e22';
+    else if (_reviewedFilenames.indexOf(key) >= 0) color = '#2980b9';
+    var marker = L.circleMarker([frame.lat, frame.lon], {
+      radius: 5, color: color, fillColor: color, fillOpacity: 0.8, weight: 1.5
+    });
+    marker.on('click', function() {
+      openFrameModal(_modalFrames.length ? _modalFrames : frames, [], idx, sid);
+    });
+    marker.addTo(_reviewMarkerLayer);
+    bounds.push([frame.lat, frame.lon]);
+  });
+
+  if (bounds.length) {
+    try { _reviewMap.fitBounds(bounds, { padding: [20, 20] }); } catch(e) {}
+  }
+}
+
 // ── Review Tab ────────────────────────────────────────────────────────────────
 async function loadReviewSessions() {
   try {
@@ -424,28 +481,40 @@ document.getElementById('review-session-select').addEventListener('change', asyn
   const status = document.getElementById('review-status');
   grid.innerHTML = '';
   document.getElementById('review-stats-panel').style.display = 'none';
+  _reviewedFilenames = [];
+  _trainingFilenames = [];
+  _currentReviewBoundaryId = null;
   if (!sid) return;
   status.textContent = 'Memuat frame...';
   try {
-    const [framesRes, holesRes] = await Promise.all([
+    const [framesRes, holesRes, sessionsRes] = await Promise.all([
       fetch('/api/sessions/' + sid + '/frames'),
-      fetch('/api/map/' + sid)
+      fetch('/api/map/' + sid),
+      fetch('/api/sessions')
     ]);
     const frames = await framesRes.json();
     const holesGeoJSON = await holesRes.json();
     const holes = holesGeoJSON.features || [];
+    const sessions = await sessionsRes.json();
+    const sess = sessions.find(function(s) { return String(s.id) === String(sid); });
+    if (sess && sess.boundary_id) _currentReviewBoundaryId = sess.boundary_id;
     status.textContent = frames.length + ' frame, ' + holes.length + ' lubang terdeteksi';
     renderFrameGrid(frames, sid);
     // Fetch review stats
     fetch('/api/sessions/' + sid + '/review-stats')
       .then(r => r.json())
       .then(function(stats) {
+        _reviewedFilenames = stats.reviewed_filenames || [];
+        _trainingFilenames = stats.training_filenames || [];
         const panel = document.getElementById('review-stats-panel');
         panel.style.display = '';
         document.getElementById('review-stats-text').textContent =
-          stats.reviewed_frames + ' frame di-review · ' + stats.total + ' lubang total (' +
+          stats.reviewed_frames + ' frame di-review · ' +
+          stats.training_frames + ' frame training · ' +
+          stats.total + ' lubang total (' +
           stats.auto + ' otomatis, ' + stats.manual + ' manual)';
         document.getElementById('auto-tune-result').style.display = 'none';
+        _renderReviewMap(frames, sid, _currentReviewBoundaryId);
       });
   } catch(e) {
     console.warn('review load error:', e);
@@ -501,6 +570,12 @@ function _renderModalFrame() {
   const frame   = _modalFrames[_modalIdx];
   const img     = document.getElementById('modal-img');
   const counter = document.getElementById('modal-frame-counter');
+  // Show training badge if frame already submitted
+  var tBadge = document.getElementById('training-badge');
+  if (tBadge) {
+    var frameKey = frame.video + '/' + frame.filename;
+    tBadge.style.display = _trainingFilenames.indexOf(frameKey) >= 0 ? '' : 'none';
+  }
   counter.textContent = 'Frame ' + (_modalIdx + 1) + ' / ' + _modalFrames.length +
     (frame.lat ? ' · GPS: ' + frame.lat.toFixed(5) + ', ' + frame.lon.toFixed(5) : ' · GPS tidak tersedia');
   document.getElementById('modal-info').textContent = 'Memuat lubang...';
@@ -721,6 +796,23 @@ async function deleteAllHoles() {
     document.getElementById('modal-info').textContent = '0 lubang di frame ini';
     if (currentSessionId == _modalSid) loadHoles(_modalSid);
   } catch(e) { alert('Gagal: ' + e.message); }
+}
+
+async function submitFrameTraining() {
+  const frame = _modalFrames[_modalIdx];
+  if (!frame) return;
+  const res = await fetch('/api/sessions/' + _modalSid + '/frame-training', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ video: frame.video, filename: frame.filename })
+  });
+  if (res.ok) {
+    document.getElementById('training-badge').style.display = '';
+    const key = frame.video + '/' + frame.filename;
+    if (_trainingFilenames.indexOf(key) < 0) _trainingFilenames.push(key);
+    if (_reviewedFilenames.indexOf(key) < 0) _reviewedFilenames.push(key);
+    _renderReviewMap(_modalFrames, _modalSid, _currentReviewBoundaryId);
+  }
 }
 
 async function runAutoTune() {
